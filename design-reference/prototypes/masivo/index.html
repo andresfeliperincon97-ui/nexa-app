@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>NEXA — Nexíficar Masivo</title>
+<link rel="stylesheet" href="../../colors_and_type.css">
+<style>
+  html,body{margin:0;background:var(--nx-bg-app);font-family:var(--nx-font-sans);color:var(--nx-fg-primary);min-height:100vh;}
+  *{box-sizing:border-box;}
+  @keyframes nx-pulse{0%,100%{box-shadow:0 0 20px rgba(0,194,203,.6);}50%{box-shadow:0 0 30px rgba(0,194,203,.9),0 0 50px rgba(0,194,203,.25);}}
+  .app{display:flex;min-height:100vh;}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;}
+  .content{padding:24px 32px 64px;display:flex;flex-direction:column;gap:20px;}
+  .row-input{display:grid;grid-template-columns:1.6fr 1fr;gap:20px;align-items:flex-start;}
+  .row-mapping{display:grid;grid-template-columns:1.2fr 1fr;gap:20px;align-items:flex-start;}
+  @media (max-width:1200px){.row-input,.row-mapping{grid-template-columns:1fr;}}
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-thumb{background:rgba(10,15,30,0.15);border-radius:10px;}
+  ::-webkit-scrollbar-thumb:hover{background:rgba(10,15,30,0.25);}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="../../ui_kits/nexa-app/atoms.jsx"></script>
+<script type="text/babel" src="Stepper.jsx"></script>
+<script type="text/babel" src="Mapping.jsx"></script>
+<script type="text/babel" src="Preview.jsx"></script>
+
+<script type="text/babel">
+const { useState } = React;
+
+function Sidebar() {
+  const items = [
+    { key: "dashboard", icon: "◈", name: "Dashboard" },
+    { key: "masivo",    icon: "🗂️", name: "Nexíficar Masivo", active: true },
+    { key: "pdfs",      icon: "📄", name: "Nexíficar PDFs" },
+    { key: "dividir",   icon: "✂️", name: "Dividir PDF" },
+    { key: "editar",    icon: "✏️", name: "Editar PDF" },
+    { key: "eliminar",  icon: "🗑️", name: "Eliminar Páginas" },
+    { key: "validador", icon: "⚡", name: "Validador IA" },
+  ];
+  return (
+    <aside style={{
+      width: 240, minWidth: 240, background: "#0A0F1E",
+      borderRight: "1px solid rgba(255,255,255,0.06)",
+      display: "flex", flexDirection: "column",
+      height: "100vh", position: "sticky", top: 0,
+    }}>
+      <div style={{ padding: "24px 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 34, height: 34, borderRadius: 9,
+            background: "linear-gradient(135deg,#00C2CB 0%,#0099FF 100%)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#0A0F1E", fontSize: 14, fontWeight: 900,
+            boxShadow: "0 0 18px rgba(0,194,203,0.5)",
+          }}>NX</div>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: -0.5,
+              background: "linear-gradient(135deg,#00C2CB,#66E0E4)",
+              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>NEXA</div>
+            <div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: 1.2, marginTop: 1 }}>
+              Grupo Bolívar
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style={{ flex: 1, padding: "18px 12px", overflowY: "auto" }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: 1.2, padding: "0 8px 10px" }}>
+          Menú principal
+        </div>
+        {items.map(t => (
+          <div key={t.key} style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "9px 10px", borderRadius: 10, marginBottom: 2, cursor: "pointer",
+            background: t.active ? "rgba(0,194,203,0.12)" : "transparent",
+            border: t.active ? "1px solid rgba(0,194,203,0.3)" : "1px solid transparent",
+          }}>
+            <div style={{
+              width: 26, height: 26, borderRadius: 7,
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13,
+              background: t.active ? "linear-gradient(135deg,#00C2CB,#0099FF)" : "rgba(255,255,255,0.04)",
+            }}>{t.icon}</div>
+            <div style={{ flex: 1, fontSize: 12, fontWeight: 600, color: t.active ? "#fff" : "#C8D1E0" }}>{t.name}</div>
+            {t.active && <div style={{ width: 4, height: 22, borderRadius: 4, background: "#00C2CB", boxShadow: "0 0 10px rgba(0,194,203,0.7)" }}/>}
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: "12px 16px 18px", textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 10 }}>
+        NEXA © 2026 · Grupo Bolívar
+      </div>
+    </aside>
+  );
+}
+
+function Topbar() {
+  return (
+    <div style={{
+      height: 64, background: "#FFFFFF",
+      borderBottom: "1px solid rgba(10,15,30,0.06)",
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "0 32px", position: "sticky", top: 0, zIndex: 10,
+    }}>
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 2 }}>
+          🗂️ Nexíficar Masivo
+        </div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: "#0A0F1E", letterSpacing: -0.3 }}>
+          Ensambla cientos de expedientes de una sola vez
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <Button variant="ghost" size="sm" icon="📋">Plantilla de ejemplo</Button>
+        <Button variant="ghost" size="sm" icon="💾">Guardar borrador</Button>
+        <div style={{ width: 34, height: 34, borderRadius: "50%", background: "linear-gradient(135deg,#00C2CB,#0099FF)", color: "#0A0F1E", fontWeight: 800, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>AM</div>
+      </div>
+    </div>
+  );
+}
+
+function App(){
+  const [step, setStep] = useState(3);   // show mapping + preview live
+  const [selectedRow, setSelectedRow] = useState(1);
+  const [mappings, setMappings] = useState({
+    filename: "Nombre_Salida",
+    ced: "Cedula",
+    exp: "Expediente",
+    date: "Fecha",
+    pages: "Páginas",
+  });
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const execute = () => {
+    setStep(4);
+    setRunning(true);
+    setTimeout(() => { setRunning(false); setDone(true); setStep(5); }, 2800);
+  };
+
+  if (done) {
+    return (
+      <div className="app">
+        <Sidebar/>
+        <div className="main">
+          <Topbar/>
+          <div className="content">
+            <ExpandedStepper current={5} onJump={() => {}}/>
+            <div style={{
+              background: "linear-gradient(135deg,#F6F8FB 0%,#FFFFFF 50%,rgba(0,194,203,0.04) 100%)",
+              border: "1px solid rgba(0,194,203,0.28)",
+              borderRadius: 20, padding: 48, textAlign: "center",
+              boxShadow: "0 8px 40px rgba(0,194,203,0.08)",
+            }}>
+              <div style={{ fontSize: 56, marginBottom: 14 }}>✅</div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: "#00C2CB", letterSpacing: -0.4, marginBottom: 8 }}>
+                ¡Nexificación completada!
+              </div>
+              <div style={{ fontSize: 15, color: "#556070", marginBottom: 28, maxWidth: 520, margin: "0 auto 28px", lineHeight: 1.6 }}>
+                <strong>42 expedientes</strong> ensamblados · <strong>1,284 páginas</strong> procesadas · <strong>98.4%</strong> validados con IA en <strong>2m 18s</strong>.
+              </div>
+              <div style={{ display: "inline-flex", gap: 10, marginBottom: 24 }}>
+                <Button variant="primary" icon="⬇️">Descargar ZIP (42 PDFs · 184 MB)</Button>
+                <Button variant="secondary" icon="⚡">Abrir en Validador IA</Button>
+              </div>
+              <div style={{ marginTop: 10, fontSize: 12, color: "#8494A8" }}>
+                <a onClick={() => { setDone(false); setStep(0); }} style={{ color: "#00C2CB", cursor: "pointer", fontWeight: 700 }}>← Nexíficar otro lote</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (running) {
+    return (
+      <div className="app">
+        <Sidebar/>
+        <div className="main">
+          <Topbar/>
+          <div className="content">
+            <ExpandedStepper current={4} onJump={() => {}}/>
+            <div style={{ background: "#fff", border: "1px solid rgba(10,15,30,0.08)", borderRadius: 16, padding: 48, textAlign: "center" }}>
+              <div style={{ width: 64, height: 64, margin: "0 auto 20px", borderRadius: "50%", background: "linear-gradient(135deg,#00C2CB,#0099FF)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, animation: "nx-pulse 1.6s infinite", color: "#0A0F1E" }}>🚀</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "#0A0F1E", letterSpacing: -0.3, marginBottom: 8 }}>Nexificando 42 expedientes…</div>
+              <div style={{ fontSize: 13, color: "#8494A8" }}>Leyendo ZIPs · Ensamblando portadas · Validando con IA</div>
+              <div style={{ width: 360, height: 6, background: "#F6F8FB", borderRadius: 3, margin: "24px auto 10px", overflow: "hidden" }}>
+                <div style={{ width: "68%", height: "100%", background: "linear-gradient(90deg,#00C2CB,#0099FF)", borderRadius: 3, boxShadow: "0 0 12px rgba(0,194,203,0.5)" }}/>
+              </div>
+              <div style={{ fontSize: 11, color: "#556070", fontFamily: "'JetBrains Mono', monospace" }}>28 / 42 · 67%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      <Sidebar/>
+      <div className="main">
+        <Topbar/>
+        <div className="content">
+
+          <ExpandedStepper current={step} onJump={setStep}/>
+
+          <div className="row-input">
+            <ExcelPreview selectedRow={selectedRow} onSelectRow={setSelectedRow}/>
+            <ZipPanel/>
+          </div>
+
+          <div className="row-mapping">
+            <MappingPanel
+              mappings={mappings}
+              onUpdate={(k, v) => setMappings({...mappings, [k]: v})}
+            />
+            <LivePreview rowIndex={selectedRow}/>
+          </div>
+
+          <div style={{
+            background: "linear-gradient(135deg, #0A0F1E 0%, #1A2234 100%)",
+            borderRadius: 16, padding: "20px 24px",
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            border: "1px solid rgba(0,194,203,0.2)",
+            boxShadow: "0 4px 24px rgba(10,15,30,0.12)",
+          }}>
+            <div style={{ color: "#fff" }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 4 }}>
+                🎯 Listo para ejecutar
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: -0.2 }}>
+                42 expedientes · 1,284 páginas · ~2m 30s estimado
+              </div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", marginTop: 4 }}>
+                Todos los campos requeridos están mapeados. El resultado se valida automáticamente con IA.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Button variant="dark" icon="👁">Ver 5 ejemplos más</Button>
+              <Button variant="primary" icon="🚀" onClick={execute} style={{ fontSize: 15, padding: "12px 28px" }}>
+                Nexíficar 42 expedientes
+              </Button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>

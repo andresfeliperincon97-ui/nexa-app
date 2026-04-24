@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>NEXA — Validador IA</title>
+<link rel="stylesheet" href="../../colors_and_type.css">
+<style>
+  html,body{margin:0;background:var(--nx-bg-app);font-family:var(--nx-font-sans);color:var(--nx-fg-primary);min-height:100vh;overflow:hidden;}
+  *{box-sizing:border-box;}
+  @keyframes nx-pulse{0%,100%{box-shadow:0 0 24px rgba(0,194,203,.7);}50%{box-shadow:0 0 36px rgba(0,194,203,1),0 0 60px rgba(0,194,203,.3);}}
+  @keyframes nx-annot-flash{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0);}50%{box-shadow:0 0 0 4px rgba(245,158,11,0.2);}}
+  @keyframes nx-typing{0%,60%,100%{transform:translateY(0);opacity:.4;}30%{transform:translateY(-4px);opacity:1;}}
+  .app{display:flex;height:100vh;overflow:hidden;}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;}
+  .vrow{display:grid;grid-template-columns:1fr 420px;flex:1;min-height:0;}
+  ::-webkit-scrollbar{width:8px;height:8px;}
+  ::-webkit-scrollbar-thumb{background:rgba(10,15,30,0.15);border-radius:10px;}
+  ::-webkit-scrollbar-thumb:hover{background:rgba(10,15,30,0.25);}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="../../ui_kits/nexa-app/atoms.jsx"></script>
+<script type="text/babel" src="PdfViewer.jsx"></script>
+<script type="text/babel" src="Panels.jsx"></script>
+
+<script type="text/babel">
+const { useState } = React;
+
+// ══════════════════════════════════════════════════════
+//  Data
+// ══════════════════════════════════════════════════════
+const FINDINGS = [
+  { id: 1, severity: "high",   title: "Cédula duplicada en varias páginas", description: "El número 1.082.934.221 aparece como comprador en pág. 14 y también como testigo en pág. 23.", page: 14, rule: "coherencia_identidad" },
+  { id: 2, severity: "medium", title: "Página 7 escaneada borrosa",        description: "Calidad OCR baja (62%) — algunas cláusulas podrían no ser extraídas correctamente.", page: 7, rule: "calidad_ocr" },
+  { id: 3, severity: "medium", title: "Fecha de firma fuera de rango",     description: "La fecha del contrato (12/ene/2026) es anterior al avalúo (03/feb/2026).", page: 14, rule: "coherencia_fechas" },
+  { id: 4, severity: "low",    title: "Metadato de autor sin limpiar",     description: "El archivo contiene el autor original del PDF. Recomendamos limpiarlo antes de archivar.", page: 1, rule: "privacidad_metadata" },
+  { id: 5, severity: "ok",     title: "Firmas digitales válidas",          description: "Ambas firmas tienen certificado vigente y cadena de confianza verificada.", page: 14, rule: "firmas_digitales" },
+];
+
+const CHECKS = [
+  { category: "Integridad",  status: "ok",   label: "Archivo no corrupto",           detail: "48 págs" },
+  { category: "Integridad",  status: "ok",   label: "Páginas en orden secuencial" },
+  { category: "Integridad",  status: "warn", label: "1 página con OCR baja calidad", detail: "pág. 7" },
+  { category: "Datos",       status: "warn", label: "Cédula duplicada",               detail: "págs. 14, 23" },
+  { category: "Datos",       status: "ok",   label: "Fechas formato ISO" },
+  { category: "Datos",       status: "ok",   label: "Montos coherentes" },
+  { category: "Firmas",      status: "ok",   label: "2 firmas digitales válidas" },
+  { category: "Firmas",      status: "ok",   label: "Certificados vigentes" },
+  { category: "Privacidad",  status: "warn", label: "Metadato autor sin limpiar" },
+  { category: "Privacidad",  status: "ok",   label: "Sin datos GPS embebidos" },
+];
+
+const ANNOTATIONS = {
+  7: [
+    { type: "warn", top: 25, left: 10, width: 80, height: 18, label: "⚠ OCR 62%", note: "Calidad baja — algunas cláusulas podrían haberse extraído incorrectamente." },
+  ],
+  14: [
+    { type: "danger", top: 72, left: 10, width: 38, height: 10, label: "✕ Cédula duplicada", note: "Aparece también como testigo en pág. 23." },
+    { type: "warn",   top: 6,  left: 54, width: 30, height: 5,  label: "⚠ Fecha inconsistente", note: "Anterior al avalúo (03/feb/2026)." },
+  ],
+};
+
+const INITIAL_CHAT = [
+  { role: "system", text: "Validación completada · 48 páginas · 3 hallazgos requieren atención" },
+  { role: "ai", text: "Hola Ana María. He analizado el expediente_042.pdf y encontré 3 observaciones relevantes: una cédula duplicada entre páginas 14 y 23, un posible problema de OCR en la página 7, y una inconsistencia de fechas entre el contrato y el avalúo. ¿Por dónde quieres empezar?", refs: ["pág. 14", "pág. 7", "pág. 23"] },
+  { role: "user", text: "Muéstrame la firma de la página 14, ¿es válida?" },
+  { role: "ai", text: "Sí, ambas firmas de la página 14 son válidas: tienen certificado digital vigente y la cadena de confianza se verifica contra la Cámara de Comercio. La firma del comprador coincide con la cédula 1.082.934.221 — pero precisamente esa cédula aparece también como testigo en la página 23, lo cual es inusual.", refs: ["pág. 14 · firmas", "pág. 23"] },
+];
+
+// ══════════════════════════════════════════════════════
+//  Sidebar simplificado (contexto del Validador)
+// ══════════════════════════════════════════════════════
+function ValidadorSidebar() {
+  const recent = [
+    { name: "expediente_042.pdf",       score: 97, status: "active" },
+    { name: "contrato_vivienda_8821.pdf", score: 94, status: "done" },
+    { name: "poliza_seguros_2031.pdf",  score: 82, status: "done" },
+    { name: "avaluo_inmueble_77.pdf",   score: 99, status: "done" },
+    { name: "acta_entrega_551.pdf",     score: 91, status: "done" },
+  ];
+  return (
+    <aside style={{
+      width: 240, minWidth: 240, background: "#0A0F1E",
+      display: "flex", flexDirection: "column",
+      height: "100vh", borderRight: "1px solid rgba(255,255,255,0.06)",
+    }}>
+      <div style={{ padding: "20px 18px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: 9,
+            background: "linear-gradient(135deg,#00C2CB 0%,#0099FF 100%)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#0A0F1E", fontSize: 12, fontWeight: 900,
+            boxShadow: "0 0 18px rgba(0,194,203,0.5)",
+          }}>NX</div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, letterSpacing: -0.5, color: "#fff" }}>NEXA</div>
+            <div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: 1.2, marginTop: 1 }}>
+              Validador IA
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: 14, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+        <Button variant="primary" size="md" icon="＋" style={{ width: "100%" }}>Nueva validación</Button>
+      </div>
+
+      <div style={{ padding: "14px 14px 8px", flex: 1, overflowY: "auto" }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: 1.2, padding: "0 4px 10px" }}>
+          Validaciones recientes
+        </div>
+        {recent.map((r, i) => {
+          const active = r.status === "active";
+          return (
+            <div key={i} style={{
+              padding: "9px 10px", borderRadius: 9, marginBottom: 3, cursor: "pointer",
+              background: active ? "rgba(0,194,203,0.12)" : "transparent",
+              border: active ? "1px solid rgba(0,194,203,0.3)" : "1px solid transparent",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                <div style={{ fontSize: 11, color: active ? "#fff" : "#C8D1E0", fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  📄 {r.name}
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ flex: 1, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
+                  <div style={{ width: `${r.score}%`, height: "100%", background: r.score > 95 ? "#10B981" : r.score > 85 ? "#00C2CB" : "#F59E0B" }}/>
+                </div>
+                <div style={{ fontSize: 10, color: active ? "#00C2CB" : "rgba(255,255,255,0.5)", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+                  {r.score}%
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ padding: "12px 14px 18px", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+        <a href="../Dashboard.html" style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 10px", borderRadius: 8,
+          fontSize: 11, color: "rgba(255,255,255,0.6)", textDecoration: "none",
+        }}>
+          ← Volver al Dashboard
+        </a>
+      </div>
+    </aside>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+//  Topbar del Validador
+// ══════════════════════════════════════════════════════
+function ValidadorTopbar({ score }) {
+  return (
+    <div style={{
+      height: 64, background: "#fff",
+      borderBottom: "1px solid rgba(10,15,30,0.06)",
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "0 24px", flexShrink: 0,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: 10,
+          background: "linear-gradient(135deg,#00C2CB,#0099FF)",
+          color: "#0A0F1E", fontSize: 18, fontWeight: 900,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: "0 0 16px rgba(0,194,203,0.45)",
+          animation: "nx-pulse 3s infinite",
+        }}>⚡</div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4 }}>
+            Validador IA · Constructora Bolívar
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "#0A0F1E", letterSpacing: -0.3 }}>
+            expediente_042.pdf
+            <span style={{ fontSize: 11, color: "#8494A8", fontWeight: 500, marginLeft: 10, fontFamily: "'JetBrains Mono', monospace" }}>
+              EXP-2026-042 · 48 págs · 2.4 MB
+            </span>
+          </div>
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <ScoreRing score={score}/>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button variant="secondary" size="sm" icon="⤓">Exportar informe</Button>
+          <Button variant="primary" size="sm" icon="✓">Aprobar expediente</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScoreRing({ score }) {
+  const r = 22, c = 2 * Math.PI * r;
+  const offset = c - (score / 100) * c;
+  const color = score > 95 ? "#10B981" : score > 85 ? "#00C2CB" : "#F59E0B";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ position: "relative", width: 52, height: 52 }}>
+        <svg width={52} height={52}>
+          <circle cx={26} cy={26} r={r} fill="none" stroke="rgba(10,15,30,0.08)" strokeWidth={4}/>
+          <circle cx={26} cy={26} r={r} fill="none" stroke={color} strokeWidth={4}
+                  strokeDasharray={c} strokeDashoffset={offset}
+                  strokeLinecap="round" transform="rotate(-90 26 26)" />
+        </svg>
+        <div style={{
+          position: "absolute", inset: 0, display: "flex",
+          alignItems: "center", justifyContent: "center",
+          fontSize: 12, fontWeight: 800, color: "#0A0F1E",
+          letterSpacing: -0.3,
+        }}>{score}%</div>
+      </div>
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.9, color: "#8494A8" }}>
+          Score de validación
+        </div>
+        <div style={{ fontSize: 12, color: "#0A0F1E", fontWeight: 700 }}>
+          3 observaciones · <span style={{ color: "#10B981" }}>listo para aprobar</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+//  Right panel with tabs
+// ══════════════════════════════════════════════════════
+function RightPanel({ currentPage, setCurrentPage, selectedFinding, setSelectedFinding }) {
+  const [tab, setTab] = useState("findings");
+  const tabs = [
+    { key: "findings", label: "Hallazgos", badge: 3 },
+    { key: "checks",   label: "Chequeos", badge: null },
+    { key: "chat",     label: "Conversar", badge: null },
+  ];
+  return (
+    <div style={{
+      background: "#fff", borderLeft: "1px solid rgba(10,15,30,0.06)",
+      display: "flex", flexDirection: "column", minHeight: 0,
+    }}>
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 4, padding: 12, borderBottom: "1px solid rgba(10,15,30,0.06)", flexShrink: 0 }}>
+        {tabs.map(t => {
+          const active = tab === t.key;
+          return (
+            <button key={t.key} onClick={() => setTab(t.key)} style={{
+              flex: 1, padding: "8px 10px",
+              background: active ? "linear-gradient(135deg,#00C2CB,#0099FF)" : "transparent",
+              color: active ? "#0A0F1E" : "#556070",
+              border: "none", borderRadius: 9,
+              fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+              cursor: "pointer",
+              boxShadow: active ? "0 4px 14px rgba(0,194,203,0.25)" : "none",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            }}>
+              {t.label}
+              {t.badge && <span style={{
+                fontSize: 10, padding: "1px 7px", borderRadius: 999,
+                background: active ? "#0A0F1E" : "rgba(239,68,68,0.12)",
+                color: active ? "#00C2CB" : "#EF4444",
+                fontWeight: 800,
+              }}>{t.badge}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: 16, minHeight: 0 }}>
+        {tab === "findings" && (
+          <FindingsPanel findings={FINDINGS} selected={selectedFinding}
+            onSelect={(f) => { setSelectedFinding(f.id); setCurrentPage(f.page); }}/>
+        )}
+        {tab === "checks" && <ChecksList checks={CHECKS}/>}
+        {tab === "chat"   && <ChatPanel initial={INITIAL_CHAT}/>}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+//  App
+// ══════════════════════════════════════════════════════
+function App() {
+  const [currentPage, setCurrentPage] = useState(14);
+  const [selectedFinding, setSelectedFinding] = useState(1);
+
+  return (
+    <div className="app">
+      <ValidadorSidebar/>
+      <div className="main">
+        <ValidadorTopbar score={97}/>
+        <div className="vrow">
+          <PdfViewer currentPage={currentPage} setCurrentPage={setCurrentPage} annotations={ANNOTATIONS}/>
+          <RightPanel
+            currentPage={currentPage} setCurrentPage={setCurrentPage}
+            selectedFinding={selectedFinding} setSelectedFinding={setSelectedFinding}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>

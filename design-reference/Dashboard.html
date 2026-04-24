@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>NEXA — Dashboard principal</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:var(--nx-bg-app);font-family:var(--nx-font-sans);color:var(--nx-fg-primary);min-height:100vh;}
+  *{box-sizing:border-box;}
+  @keyframes nx-pulse{0%,100%{box-shadow:0 0 24px rgba(0,194,203,.7);}50%{box-shadow:0 0 36px rgba(0,194,203,1),0 0 60px rgba(0,194,203,.3);}}
+  .app{display:flex;min-height:100vh;}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;}
+  .content{padding:24px 32px 64px;display:flex;flex-direction:column;gap:20px;}
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-thumb{background:rgba(10,15,30,0.15);border-radius:10px;}
+  ::-webkit-scrollbar-thumb:hover{background:rgba(10,15,30,0.25);}
+  .row-2{display:grid;grid-template-columns:1.5fr 1fr;gap:20px;align-items:flex-start;}
+  @media (max-width:1200px){.row-2{grid-template-columns:1fr;}}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="../ui_kits/nexa-app/atoms.jsx"></script>
+<script type="text/babel" src="../ui_kits/nexa-app/Shell.jsx"></script>
+<script type="text/babel" src="../ui_kits/nexa-app/Panels.jsx"></script>
+<script type="text/babel" src="../ui_kits/nexa-app/DashboardKpis.jsx"></script>
+<script type="text/babel" src="../ui_kits/nexa-app/OrgActivity.jsx"></script>
+<script type="text/babel" src="../ui_kits/nexa-app/QuickActions.jsx"></script>
+
+<script type="text/babel">
+const { useState } = React;
+
+function DashboardTopbar(){
+  return (
+    <div style={{
+      height: 64, background: "#FFFFFF",
+      borderBottom: "1px solid rgba(10,15,30,0.06)",
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "0 32px", position: "sticky", top: 0, zIndex: 10,
+    }}>
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 2 }}>
+          ⚡ NEXA Platform · Dashboard
+        </div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: "#0A0F1E", letterSpacing: -0.3 }}>
+          Buenos días, Ana María 👋
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: "#F6F8FB", borderRadius: 9, border: "1px solid rgba(10,15,30,0.06)" }}>
+          <span style={{ fontSize: 11, color: "#8494A8", fontWeight: 600 }}>Periodo:</span>
+          <span style={{ fontSize: 12, color: "#0A0F1E", fontWeight: 700 }}>Últimos 14 días ▾</span>
+        </div>
+        <input placeholder="Buscar expediente… ⌘K" style={{
+          width: 240, height: 36, padding: "0 14px",
+          borderRadius: 9, border: "1px solid rgba(10,15,30,0.1)",
+          background: "#F6F8FB", fontSize: 13, fontFamily: "inherit",
+          color: "#0A0F1E", outline: "none",
+        }}/>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 4, background: "#10B981", boxShadow: "0 0 8px rgba(16,185,129,0.6)" }}/>
+          <span style={{ fontSize: 12, color: "#556070", fontWeight: 600 }}>En línea</span>
+        </div>
+        <div style={{
+          width: 34, height: 34, borderRadius: "50%",
+          background: "linear-gradient(135deg,#00C2CB,#0099FF)",
+          color: "#0A0F1E", fontWeight: 800, fontSize: 13,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>AM</div>
+      </div>
+    </div>
+  );
+}
+
+function DashboardSidebar({ active, onSelect }){
+  const items = [
+    { key: "dashboard", icon: "◈", name: "Dashboard",         desc: "Vista general" },
+    { key: "masivo",    icon: "🗂️", name: "Nexíficar Masivo", desc: "Excel + ZIP" },
+    { key: "pdfs",      icon: "📄", name: "Nexíficar PDFs",    desc: "Une múltiples" },
+    { key: "dividir",   icon: "✂️", name: "Dividir PDF",        desc: "Por páginas" },
+    { key: "editar",    icon: "✏️", name: "Editar PDF",         desc: "Editor visual" },
+    { key: "eliminar",  icon: "🗑️", name: "Eliminar Páginas",   desc: "Visualmente" },
+    { key: "validador", icon: "⚡", name: "Validador IA",       desc: "Revisar con IA" },
+  ];
+  return (
+    <aside style={{
+      width: 240, minWidth: 240, background: "#0A0F1E",
+      borderRight: "1px solid rgba(255,255,255,0.06)",
+      display: "flex", flexDirection: "column",
+      height: "100vh", position: "sticky", top: 0,
+    }}>
+      <div style={{ padding: "24px 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 34, height: 34, borderRadius: 9,
+            background: "linear-gradient(135deg,#00C2CB 0%,#0099FF 100%)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#0A0F1E", fontSize: 14, fontWeight: 900,
+            boxShadow: "0 0 18px rgba(0,194,203,0.5)",
+          }}>NX</div>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: -0.5,
+              background: "linear-gradient(135deg,#00C2CB,#66E0E4)",
+              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+              backgroundClip: "text" }}>NEXA</div>
+            <div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: 1.2, marginTop: 1 }}>
+              Grupo Bolívar
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, padding: "18px 12px", overflowY: "auto" }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: 1.2, padding: "0 8px 10px" }}>
+          Menú principal
+        </div>
+        {items.map(t => {
+          const isActive = active === t.key;
+          return (
+            <div key={t.key} onClick={() => onSelect(t.key)}
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "9px 10px", borderRadius: 10,
+                marginBottom: 2, cursor: "pointer",
+                background: isActive ? "rgba(0,194,203,0.12)" : "transparent",
+                border: isActive ? "1px solid rgba(0,194,203,0.3)" : "1px solid transparent",
+                transition: "all .15s",
+              }}>
+              <div style={{
+                width: 26, height: 26, borderRadius: 7,
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13,
+                background: isActive ? "linear-gradient(135deg,#00C2CB,#0099FF)" : "rgba(255,255,255,0.04)",
+              }}>{t.icon}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: isActive ? "#fff" : "#C8D1E0" }}>{t.name}</div>
+                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 1 }}>{t.desc}</div>
+              </div>
+              {isActive && <div style={{ width: 4, height: 22, borderRadius: 4, background: "#00C2CB", boxShadow: "0 0 10px rgba(0,194,203,0.7)" }}/>}
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ padding: "14px 16px", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 10 }}>
+          🏢 Organizaciones
+        </div>
+        <OrgMiniRow short="CB" name="Constructora Bolívar" accent="#00C2CB" count={34}/>
+        <OrgMiniRow short="DV" name="Davivienda"           accent="#0099FF" count={21}/>
+        <OrgMiniRow short="SB" name="Seguros Bolívar"      accent="#A855F7" count={14}/>
+      </div>
+
+      <div style={{ padding: "12px 16px 18px", textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 10 }}>
+        NEXA © 2026 · Grupo Bolívar
+      </div>
+    </aside>
+  );
+}
+
+function OrgMiniRow({ short, name, accent, count }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", borderRadius: 7, cursor: "pointer" }}>
+      <div style={{ width: 22, height: 22, borderRadius: 6, background: accent, color: "#0A0F1E", fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center" }}>{short}</div>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 11, color: "#C8D1E0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", fontFamily: "'JetBrains Mono', monospace" }}>{count}</div>
+    </div>
+  );
+}
+
+function App(){
+  const [active, setActive] = useState("dashboard");
+  return (
+    <div className="app">
+      <DashboardSidebar active={active} onSelect={setActive}/>
+      <div className="main">
+        <DashboardTopbar/>
+        <div className="content">
+          {/* Greeting / context strip */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#0A0F1E", letterSpacing: -0.5 }}>
+                Resumen del Grupo Bolívar
+              </div>
+              <div style={{ fontSize: 13, color: "#556070", marginTop: 4 }}>
+                Lunes 20 de abril · <strong style={{ color: "#00C2CB" }}>69 analistas</strong> conectados en 3 organizaciones
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button variant="secondary" size="sm" icon="⬇">Exportar reporte</Button>
+              <Button variant="primary" size="sm" icon="＋">Nuevo expediente</Button>
+            </div>
+          </div>
+
+          <HeroKpis/>
+
+          <ValidadorSpotlight onOpen={() => setActive("validador")}/>
+
+          <div className="row-2">
+            <VolumeChart/>
+            <QuickActions onGoTool={setActive}/>
+          </div>
+
+          <OrgActivityGrid/>
+
+          <DocTable/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
