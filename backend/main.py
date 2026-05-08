@@ -77,7 +77,7 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto a
 }}"""
 
     message = client.messages.create(
-        model="claude-sonnet-4-5-20251001",
+        model="claude-sonnet-4-5",
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
