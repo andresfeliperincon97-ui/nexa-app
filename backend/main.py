@@ -2,6 +2,7 @@ import os
 import io
 import json
 import re
+import base64
 import zipfile
 
 import fitz  # PyMuPDF
@@ -110,6 +111,26 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto a
     result["filename"] = file.filename
     result["pages"] = num_pages
     return result
+
+
+@app.post("/api/pdf-thumbnail")
+async def pdf_thumbnail(file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
+
+    content = await file.read()
+    doc = fitz.open(stream=content, filetype="pdf")
+    page = doc.load_page(0)
+
+    rect = page.rect
+    zoom = min(200 / rect.width, 280 / rect.height)
+    mat = fitz.Matrix(zoom, zoom)
+    pix = page.get_pixmap(matrix=mat)
+    doc.close()
+
+    png_bytes = pix.tobytes("png")
+    b64 = base64.b64encode(png_bytes).decode()
+    return {"thumbnail": f"data:image/png;base64,{b64}"}
 
 
 @app.post("/api/merge")

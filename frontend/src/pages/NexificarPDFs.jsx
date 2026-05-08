@@ -14,7 +14,19 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import Topbar from "../components/Topbar";
-import { mergePDFsOrdered } from "../services/api";
+import { getPDFThumbnail, mergePDFsOrdered } from "../services/api";
+
+const SHIMMER_STYLE = `
+  @keyframes shimmer {
+    0%   { background-position: -400px 0; }
+    100% { background-position:  400px 0; }
+  }
+  .thumb-skeleton {
+    background: linear-gradient(90deg, #e8edf2 25%, #f4f7fa 50%, #e8edf2 75%);
+    background-size: 800px 100%;
+    animation: shimmer 1.4s infinite linear;
+  }
+`;
 
 function getPDFPageCount(arrayBuffer) {
   const bytes = new Uint8Array(arrayBuffer);
@@ -28,7 +40,41 @@ function getPDFPageCount(arrayBuffer) {
   return Math.max(...counts);
 }
 
-function SortableCard({ id, file, index, onRemove }) {
+function ThumbnailArea({ thumbnail, thumbnailLoading }) {
+  if (thumbnailLoading) {
+    return (
+      <div
+        className="thumb-skeleton"
+        style={{ height: 140, width: "100%" }}
+      />
+    );
+  }
+  if (thumbnail) {
+    return (
+      <img
+        src={thumbnail}
+        alt="página 1"
+        style={{ width: "100%", height: 140, objectFit: "cover", display: "block" }}
+        draggable={false}
+      />
+    );
+  }
+  return (
+    <div style={{
+      height: 140,
+      background: "linear-gradient(135deg, #f0f4f8 0%, #e8edf2 100%)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontSize: 40,
+      color: "#C8D1E0",
+    }}>
+      📄
+    </div>
+  );
+}
+
+function SortableCard({ id, file, index, pages, thumbnail, thumbnailLoading, onRemove }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id });
 
@@ -59,61 +105,33 @@ function SortableCard({ id, file, index, onRemove }) {
         {...attributes}
         {...listeners}
       >
-        {/* Thumbnail placeholder */}
-        <div
-          style={{
-            height: 120,
-            background: "linear-gradient(135deg, #f0f4f8 0%, #e8edf2 100%)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 40,
-            color: "#C8D1E0",
-            position: "relative",
-          }}
-        >
-          📄
+        {/* Thumbnail area */}
+        <div style={{ position: "relative" }}>
+          <ThumbnailArea thumbnail={thumbnail} thumbnailLoading={thumbnailLoading} />
+
           {/* Order badge */}
-          <div
-            style={{
-              position: "absolute",
-              top: 8,
-              left: 8,
-              width: 26,
-              height: 26,
-              borderRadius: 8,
-              background: "linear-gradient(135deg,#00C2CB,#0099FF)",
-              color: "#fff",
-              fontSize: 11,
-              fontWeight: 900,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 2px 8px rgba(0,194,203,0.4)",
-            }}
-          >
+          <div style={{
+            position: "absolute", top: 8, left: 8,
+            width: 26, height: 26, borderRadius: 8,
+            background: "linear-gradient(135deg,#00C2CB,#0099FF)",
+            color: "#fff", fontSize: 11, fontWeight: 900,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 2px 8px rgba(0,194,203,0.4)",
+          }}>
             {index + 1}
           </div>
+
           {/* Remove button */}
           <button
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); onRemove(id); }}
             style={{
-              position: "absolute",
-              top: 8,
-              right: 8,
-              width: 26,
-              height: 26,
-              borderRadius: 7,
-              border: "none",
-              background: "rgba(239,68,68,0.9)",
-              color: "#fff",
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              position: "absolute", top: 8, right: 8,
+              width: 26, height: 26, borderRadius: 7,
+              border: "none", background: "rgba(239,68,68,0.9)",
+              color: "#fff", fontSize: 15, fontWeight: 700,
+              cursor: "pointer", display: "flex",
+              alignItems: "center", justifyContent: "center",
               lineHeight: 1,
             }}
           >
@@ -125,12 +143,8 @@ function SortableCard({ id, file, index, onRemove }) {
         <div style={{ padding: "10px 12px" }}>
           <div
             style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: "#0A0F1E",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              fontSize: 11, fontWeight: 700, color: "#0A0F1E",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             }}
             title={file.name}
           >
@@ -138,7 +152,7 @@ function SortableCard({ id, file, index, onRemove }) {
           </div>
           <div style={{ fontSize: 10, color: "#8494A8", marginTop: 3 }}>
             {(file.size / 1024).toFixed(0)} KB
-            {file.pages != null && ` · ${file.pages} pág.`}
+            {pages != null && ` · ${pages} pág.`}
           </div>
         </div>
       </div>
@@ -147,7 +161,7 @@ function SortableCard({ id, file, index, onRemove }) {
 }
 
 export default function NexificarPDFs() {
-  const [items, setItems] = useState([]); // [{id, file, pages}]
+  const [items, setItems] = useState([]);
   const [nombreSalida, setNombreSalida] = useState("documento_unificado.pdf");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -158,27 +172,51 @@ export default function NexificarPDFs() {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
 
-  const addFiles = useCallback(async (fileList) => {
+  const addFiles = useCallback((fileList) => {
     const pdfs = Array.from(fileList).filter((f) =>
       f.name.toLowerCase().endsWith(".pdf")
     );
     if (!pdfs.length) return;
 
-    const newItems = await Promise.all(
-      pdfs.map(async (f) => {
-        const buf = await f.arrayBuffer();
-        const pages = getPDFPageCount(buf);
-        return {
-          id: `${f.name}-${Date.now()}-${Math.random()}`,
-          file: f,
-          pages,
-        };
-      })
-    );
+    const newItems = pdfs.map((f) => ({
+      id: `${f.name}-${Date.now()}-${Math.random()}`,
+      file: f,
+      pages: null,
+      thumbnail: null,
+      thumbnailLoading: true,
+    }));
 
     setItems((prev) => [...prev, ...newItems]);
     setDone(false);
     setError(null);
+
+    // Fire async work per item without blocking the render
+    newItems.forEach((item) => {
+      // Page count — local, fast
+      item.file.arrayBuffer().then((buf) => {
+        const pages = getPDFPageCount(buf);
+        setItems((prev) =>
+          prev.map((i) => (i.id === item.id ? { ...i, pages } : i))
+        );
+      });
+
+      // Thumbnail — remote call
+      getPDFThumbnail(item.file)
+        .then((thumbnail) => {
+          setItems((prev) =>
+            prev.map((i) =>
+              i.id === item.id ? { ...i, thumbnail, thumbnailLoading: false } : i
+            )
+          );
+        })
+        .catch(() => {
+          setItems((prev) =>
+            prev.map((i) =>
+              i.id === item.id ? { ...i, thumbnailLoading: false } : i
+            )
+          );
+        });
+    });
   }, []);
 
   const handleDrop = (e) => {
@@ -230,6 +268,7 @@ export default function NexificarPDFs() {
 
   return (
     <>
+      <style>{SHIMMER_STYLE}</style>
       <Topbar supertitle="Herramientas PDF" title="Nexificar PDFs" />
       <div style={{ padding: "40px 40px 80px", maxWidth: 1100 }}>
 
@@ -307,6 +346,8 @@ export default function NexificarPDFs() {
                       file={item.file}
                       index={idx}
                       pages={item.pages}
+                      thumbnail={item.thumbnail}
+                      thumbnailLoading={item.thumbnailLoading}
                       onRemove={handleRemove}
                     />
                   ))}

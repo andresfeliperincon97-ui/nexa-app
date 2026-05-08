@@ -56,6 +56,15 @@ export async function mergePDFs(files) {
   return res.blob();
 }
 
+export async function getPDFThumbnail(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_URL}/api/pdf-thumbnail`, { method: "POST", body: form });
+  if (!res.ok) throw new Error("thumbnail failed");
+  const data = await res.json();
+  return data.thumbnail;
+}
+
 export async function mergePDFsOrdered(files, nombreSalida) {
   const form = new FormData();
   for (const f of files) form.append("files", f);
