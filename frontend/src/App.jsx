@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
 import NexificarMasivo from "./pages/NexificarMasivo";
@@ -17,30 +17,20 @@ function PlaceholderPage({ title, icon }) {
 }
 
 function AppLayout() {
-  const location = useLocation();
-  const isValidador = location.pathname === "/validador";
-
-  if (isValidador) {
-    return (
-      <div style={{ display: "flex", minHeight: "100vh" }}>
-        <ValidadorIA />
-      </div>
-    );
-  }
-
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
       <Sidebar />
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "#F6F8FB" }}>
         <Routes>
-          <Route path="/"            element={<Dashboard />} />
-          <Route path="/masivo"        element={<NexificarMasivo />} />
+          <Route path="/"             element={<Dashboard />} />
+          <Route path="/masivo"       element={<NexificarMasivo />} />
           <Route path="/nexificar-ia" element={<NexificarIA />} />
+          <Route path="/validador"    element={<ValidadorIA />} />
           <Route path="/organizacion" element={<Organizacion />} />
-          <Route path="/pdfs"        element={<PlaceholderPage title="Nexíficar PDFs" icon="📄" />} />
-          <Route path="/dividir"     element={<PlaceholderPage title="Dividir PDF" icon="✂️" />} />
-          <Route path="/editar"      element={<PlaceholderPage title="Editar PDF" icon="✏️" />} />
-          <Route path="/eliminar"    element={<PlaceholderPage title="Eliminar Páginas" icon="🗑️" />} />
+          <Route path="/pdfs"         element={<PlaceholderPage title="Nexíficar PDFs" icon="📄" />} />
+          <Route path="/dividir"      element={<PlaceholderPage title="Dividir PDF" icon="✂️" />} />
+          <Route path="/editar"       element={<PlaceholderPage title="Editar PDF" icon="✏️" />} />
+          <Route path="/eliminar"     element={<PlaceholderPage title="Eliminar Páginas" icon="🗑️" />} />
         </Routes>
       </div>
     </div>

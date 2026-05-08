@@ -407,58 +407,19 @@ export default function ValidadorIA() {
   };
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-      {/* Sidebar */}
-      <aside style={{ width: 240, minWidth: 240, background: "#0A0F1E", display: "flex", flexDirection: "column", height: "100vh", borderRight: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
-        <div style={{ padding: "20px 18px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 9, background: "linear-gradient(135deg,#00C2CB,#0099FF)", display: "flex", alignItems: "center", justifyContent: "center", color: "#0A0F1E", fontSize: 12, fontWeight: 900, boxShadow: "0 0 18px rgba(0,194,203,0.5)" }}>NX</div>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 900, color: "#fff" }}>NEXA</div>
-              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: 1.2, marginTop: 1 }}>Validador IA</div>
-            </div>
-          </div>
-        </div>
-        <div style={{ padding: 14, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-          <button onClick={reset} style={{ width: "100%", background: "linear-gradient(135deg,#00C2CB,#0099FF)", color: "#0A0F1E", padding: "10px 16px", borderRadius: 10, border: "none", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>＋ Nueva validación</button>
-        </div>
-        <div style={{ padding: "14px 14px 8px", flex: 1, overflowY: "auto" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: 1.2, padding: "0 4px 12px" }}>Estado actual</div>
-          <div style={{ padding: "12px 10px", borderRadius: 9, background: "rgba(0,194,203,0.08)", border: "1px solid rgba(0,194,203,0.2)" }}>
-            <div style={{ fontSize: 10, color: "#00C2CB", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
-              {phase === "upload" ? "● Listo" : phase === "loading" ? "⟳ Procesando" : "✓ Completado"}
-            </div>
-            {file && <div style={{ fontSize: 11, color: "#C8D1E0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📄 {file.name}</div>}
-            {result && (
-              <div style={{ marginTop: 6 }}>
-                <div style={{ height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
-                  <div style={{ width: `${result.score}%`, height: "100%", background: result.score > 90 ? "#10B981" : result.score > 75 ? "#00C2CB" : "#F59E0B" }} />
-                </div>
-                <div style={{ fontSize: 10, color: "#00C2CB", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, marginTop: 4 }}>{result.score}%</div>
-              </div>
-            )}
-          </div>
-        </div>
-        <div style={{ padding: "12px 14px 18px", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", padding: "8px 10px", lineHeight: 1.4 }}>Claude Sonnet 4.6 · Colsubsidio criterios v1.0</div>
-        </div>
-      </aside>
-
-      {/* Main */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {phase === "upload" && (
-          <UploadForm
-            file={file} setFile={setFile}
-            tipoTramite={tipoTramite} setTipoTramite={setTipoTramite}
-            criterios={criterios} setCriterios={setCriterios}
-            onRun={run} error={error}
-          />
-        )}
-        {phase === "loading" && <LoadingView filename={file?.name} />}
-        {phase === "result" && result && (
-          <ResultView result={result} onReset={reset} onDownload={downloadTxt} />
-        )}
-      </div>
+    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {phase === "upload" && (
+        <UploadForm
+          file={file} setFile={setFile}
+          tipoTramite={tipoTramite} setTipoTramite={setTipoTramite}
+          criterios={criterios} setCriterios={setCriterios}
+          onRun={run} error={error}
+        />
+      )}
+      {phase === "loading" && <LoadingView filename={file?.name} />}
+      {phase === "result" && result && (
+        <ResultView result={result} onReset={reset} onDownload={downloadTxt} />
+      )}
     </div>
   );
 }

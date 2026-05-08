@@ -30,7 +30,7 @@ export default function Sidebar() {
     }}>
       {/* Logo */}
       <div style={{ padding: "24px 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div onClick={() => navigate("/")} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
           <div style={{
             width: 34, height: 34, borderRadius: 9,
             background: "linear-gradient(135deg,#00C2CB 0%,#0099FF 100%)",
