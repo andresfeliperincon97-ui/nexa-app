@@ -11,11 +11,6 @@ const NAV_ITEMS = [
   { key: "/validador",  icon: "⚡", name: "Validador IA",        desc: "Revisar con IA" },
 ];
 
-const ORGS = [
-  { short: "CB", name: "Constructora Bolívar", accent: "#00C2CB", count: 34 },
-  { short: "DV", name: "Davivienda",            accent: "#0099FF", count: 21 },
-  { short: "SB", name: "Seguros Bolívar",        accent: "#A855F7", count: 14 },
-];
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -87,17 +82,6 @@ export default function Sidebar() {
           );
         })}
 
-        {/* Orgs section */}
-        <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: 1.2, padding: "18px 8px 10px" }}>
-          🏢 Organizaciones
-        </div>
-        {ORGS.map(org => (
-          <div key={org.short} onClick={() => navigate("/organizacion")} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", borderRadius: 7, cursor: "pointer" }}>
-            <div style={{ width: 22, height: 22, borderRadius: 6, background: org.accent, color: "#0A0F1E", fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center" }}>{org.short}</div>
-            <div style={{ flex: 1, minWidth: 0, fontSize: 11, color: "#C8D1E0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{org.name}</div>
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", fontFamily: "'JetBrains Mono', monospace" }}>{org.count}</div>
-          </div>
-        ))}
       </div>
 
       <div style={{ padding: "12px 16px 18px", textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 10 }}>
