@@ -77,8 +77,8 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto a
 }}"""
 
     message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
+        model="claude-sonnet-4-5-20251001",
+        max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
 
@@ -94,11 +94,15 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto a
         fin = texto.rfind("}")
         if inicio != -1 and fin != -1:
             texto = texto[inicio:fin+1]
+        if not texto.startswith(("{", "[")):
+            raise ValueError("Respuesta no contiene JSON válido: " + texto[:200])
         return texto
 
     try:
-        result = json.loads(limpiar_json(response_text))
-    except json.JSONDecodeError:
+        texto_limpio = limpiar_json(response_text)
+        result = json.loads(texto_limpio)
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"ERROR PARSER: {e} | Texto limpio: {response_text[:300]}")
         raise HTTPException(status_code=500, detail="Error al parsear respuesta de IA")
 
     result["filename"] = file.filename
