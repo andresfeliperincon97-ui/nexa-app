@@ -6,7 +6,7 @@ import base64
 import zipfile
 
 import fitz  # PyMuPDF
-from PyPDF2 import PdfMerger
+from PyPDF2 import PdfMerger, PdfReader, PdfWriter
 from anthropic import Anthropic
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -416,6 +416,121 @@ async def edit_pdf(
         output,
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=editado.pdf"},
+    )
+
+
+@app.post("/api/split-pdf")
+async def split_pdf(
+    file: UploadFile = File(...),
+    mode: str = Form("all"),
+    pages: str = Form(""),
+    parts_size: int = Form(1),
+):
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
+
+    content = await file.read()
+    reader = PdfReader(io.BytesIO(content))
+    total = len(reader.pages)
+
+    output_buf = io.BytesIO()
+    with zipfile.ZipFile(output_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+
+        if mode == "all":
+            for i in range(total):
+                writer = PdfWriter()
+                writer.add_page(reader.pages[i])
+                buf = io.BytesIO()
+                writer.write(buf)
+                zf.writestr(f"pagina_{i + 1:03d}.pdf", buf.getvalue())
+
+        elif mode == "select":
+            idxs = []
+            for part in pages.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                if "-" in part:
+                    a, b = part.split("-", 1)
+                    try:
+                        for n in range(int(a), int(b) + 1):
+                            if 1 <= n <= total:
+                                idxs.append(n - 1)
+                    except ValueError:
+                        pass
+                else:
+                    try:
+                        n = int(part)
+                        if 1 <= n <= total:
+                            idxs.append(n - 1)
+                    except ValueError:
+                        pass
+
+            if not idxs:
+                raise HTTPException(status_code=400, detail="No se seleccionaron páginas válidas")
+
+            writer = PdfWriter()
+            for idx in sorted(set(idxs)):
+                writer.add_page(reader.pages[idx])
+            buf = io.BytesIO()
+            writer.write(buf)
+            zf.writestr("seleccion.pdf", buf.getvalue())
+
+        elif mode == "parts":
+            size = max(1, parts_size)
+            part_num = 1
+            for start in range(0, total, size):
+                end = min(start + size, total)
+                writer = PdfWriter()
+                for i in range(start, end):
+                    writer.add_page(reader.pages[i])
+                buf = io.BytesIO()
+                writer.write(buf)
+                zf.writestr(f"parte_{part_num:02d}_pags_{start + 1}-{end}.pdf", buf.getvalue())
+                part_num += 1
+
+        else:
+            raise HTTPException(status_code=400, detail="Modo inválido")
+
+    output_buf.seek(0)
+    return StreamingResponse(
+        output_buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=dividido.zip"},
+    )
+
+
+@app.post("/api/compress-pdf")
+async def compress_pdf(
+    file: UploadFile = File(...),
+    level: str = Form("medium"),
+):
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
+
+    content = await file.read()
+    original_size = len(content)
+
+    doc = fitz.open(stream=content, filetype="pdf")
+
+    opts_map = {
+        "low":    dict(deflate=True, garbage=1),
+        "medium": dict(deflate=True, garbage=3, clean=True),
+        "high":   dict(deflate=True, garbage=4, clean=True, linear=True),
+    }
+    compressed = doc.tobytes(**opts_map.get(level, opts_map["medium"]))
+    doc.close()
+    compressed_size = len(compressed)
+
+    return StreamingResponse(
+        io.BytesIO(compressed),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": "attachment; filename=comprimido.pdf",
+            "X-Original-Size": str(original_size),
+            "X-Compressed-Size": str(compressed_size),
+            "Access-Control-Expose-Headers": "X-Original-Size, X-Compressed-Size",
+        },
     )
 
 

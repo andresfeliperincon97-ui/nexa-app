@@ -5,10 +5,11 @@ const NAV_ITEMS = [
   { key: "/masivo",       icon: "🗂️", name: "Nexíficar Masivo",  desc: "Excel + ZIP" },
   { key: "/nexificar-ia", icon: "✨", name: "Nexificar IA",      desc: "Con lenguaje natural" },
   { key: "/nexificar-pdfs", icon: "📄", name: "Nexíficar PDFs",   desc: "Une múltiples" },
-  { key: "/dividir",    icon: "✂️", name: "Dividir PDF",         desc: "Por páginas" },
-  { key: "/editar",     icon: "✏️", name: "Editar PDF",          desc: "Editor visual" },
-  { key: "/eliminar",   icon: "🗑️", name: "Eliminar Páginas",    desc: "Visualmente" },
-  { key: "/validador",  icon: "⚡", name: "Validador IA",        desc: "Revisar con IA" },
+  { key: "/dividir-pdf",   icon: "✂️", name: "Dividir PDF",       desc: "Por páginas" },
+  { key: "/comprimir-pdf", icon: "🗜️", name: "Comprimir PDF",    desc: "Reducir tamaño" },
+  { key: "/editar",        icon: "✏️", name: "Editar PDF",        desc: "Editor visual" },
+  { key: "/eliminar",      icon: "🗑️", name: "Eliminar Páginas",  desc: "Visualmente" },
+  { key: "/validador",     icon: "⚡", name: "Validador IA",      desc: "Revisar con IA" },
 ];
 
 
