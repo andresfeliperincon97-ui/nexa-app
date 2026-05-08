@@ -1,15 +1,22 @@
+import os
+import io
+import json
+import re
+
+import fitz  # PyMuPDF
+from PyPDF2 import PdfMerger
+from anthropic import Anthropic
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import uvicorn
-import io
+from fastapi.responses import StreamingResponse
+
+client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 app = FastAPI(title="NEXA API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -17,63 +24,97 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "NEXA API", "version": "1.0.0"}
+    return {"status": "ok", "app": "NEXA", "version": "1.0"}
 
 
-class ValidateResponse(BaseModel):
-    filename: str
-    pages: int
-    score: float
-    findings: list
-    checks: list
-    summary: str
-
-
-@app.post("/api/validate", response_model=ValidateResponse)
+@app.post("/api/validate")
 async def validate_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
 
     content = await file.read()
-    size_mb = round(len(content) / (1024 * 1024), 2)
 
-    # Mock validation — replace with real PyMuPDF + Anthropic analysis
-    findings = [
-        {
-            "id": 1,
-            "severity": "medium",
-            "title": "Calidad OCR baja en 1 página",
-            "description": "Se detectó una página con baja resolución de escaneo (< 72 dpi).",
-            "page": 3,
-            "rule": "calidad_ocr",
-        },
-        {
-            "id": 2,
-            "severity": "ok",
-            "title": "Firmas digitales válidas",
-            "description": "Todas las firmas tienen certificado vigente.",
-            "page": 1,
-            "rule": "firmas_digitales",
-        },
-    ]
+    doc = fitz.open(stream=content, filetype="pdf")
+    num_pages = len(doc)
+    text = "".join(page.get_text() for page in doc)
+    doc.close()
 
-    checks = [
-        {"category": "Integridad", "status": "ok",   "label": "Archivo no corrupto",       "detail": f"{size_mb} MB"},
-        {"category": "Integridad", "status": "ok",   "label": "Páginas en orden secuencial"},
-        {"category": "Datos",      "status": "ok",   "label": "Fechas formato ISO"},
-        {"category": "Firmas",     "status": "ok",   "label": "Sin firmas digitales rotas"},
-        {"category": "Privacidad", "status": "warn", "label": "Metadatos de autor presentes"},
-    ]
+    text_preview = text[:8000]
 
-    return ValidateResponse(
-        filename=file.filename,
-        pages=12,
-        score=94.5,
-        findings=findings,
-        checks=checks,
-        summary=f"Archivo {file.filename} analizado correctamente. Se encontraron {len([f for f in findings if f['severity'] != 'ok'])} observaciones.",
+    prompt = f"""Eres un experto en validación de documentos de desembolsos para Colsubsidio.
+
+Analiza el siguiente texto extraído de un documento PDF y valida si cumple con los criterios
+de desembolsos de Colsubsidio (cedula, carta laboral, desprendible de nómina, pagaré, etc.).
+
+Texto del documento:
+{text_preview}
+
+Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto adicional:
+{{
+  "score": <número entre 0 y 100>,
+  "resultado_general": "<APROBADO|APROBADO_CON_OBSERVACIONES|RECHAZADO>",
+  "hallazgos": [
+    {{
+      "tipo": "<error|advertencia|ok>",
+      "descripcion": "<descripción del hallazgo>",
+      "campo": "<campo o sección afectada>"
+    }}
+  ],
+  "documentos_faltantes": ["<documento faltante>"],
+  "recomendaciones": ["<recomendación>"]
+}}"""
+
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    response_text = message.content[0].text.strip()
+
+    try:
+        result = json.loads(response_text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", response_text, re.DOTALL)
+        if not match:
+            raise HTTPException(status_code=500, detail="Error al parsear respuesta de IA")
+        result = json.loads(match.group())
+
+    result["filename"] = file.filename
+    result["pages"] = num_pages
+    return result
+
+
+@app.post("/api/merge")
+async def merge_pdfs(files: list[UploadFile] = File(...)):
+    if len(files) < 2:
+        raise HTTPException(status_code=400, detail="Se necesitan al menos 2 archivos PDF")
+
+    merger = PdfMerger()
+    for file in files:
+        if not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail=f"{file.filename} no es un PDF")
+        merger.append(io.BytesIO(await file.read()))
+
+    output = io.BytesIO()
+    merger.write(output)
+    merger.close()
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=merged.pdf"},
     )
 
 
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+@app.get("/api/stats")
+def get_stats():
+    return {
+        "documentos_mes": 1284,
+        "paginas_procesadas": 18432,
+        "expedientes_nexificados": 347,
+        "score_validacion": 91.7,
+        "tiempo_promedio": 4.2,
+        "analistas_activos": 12,
+    }
