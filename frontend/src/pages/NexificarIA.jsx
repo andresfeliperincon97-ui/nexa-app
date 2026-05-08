@@ -7,7 +7,79 @@ const INSTRUCCIONES_GUARDADAS = [
   "Renombrar con cédula del beneficiario + Desembolso",
   "Renombrar con número de radicado",
   "Extraer página 1 de cada PDF",
+  "Renombrar con cédula + Habitabilidad",
+  "Renombrar con cédula + Desembolso",
+  "Unir ESC y PYS por número de cédula",
 ];
+
+// ── ZIP parser (client-side, no deps) ─────────────────
+function parseZipFiles(arrayBuffer) {
+  const view  = new DataView(arrayBuffer);
+  const bytes = new Uint8Array(arrayBuffer);
+  const out   = [];
+
+  // Find End of Central Directory record (signature 0x06054b50)
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65558); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd === -1) return out;
+
+  const cdOffset = view.getUint32(eocd + 16, true);
+  const cdSize   = view.getUint32(eocd + 12, true);
+  const dec      = new TextDecoder("utf-8");
+  let   off      = cdOffset;
+
+  while (off < cdOffset + cdSize && off + 46 <= bytes.length) {
+    if (view.getUint32(off, true) !== 0x02014b50) break;
+    const uncompSize = view.getUint32(off + 24, true);
+    const fnLen      = view.getUint16(off + 28, true);
+    const extraLen   = view.getUint16(off + 30, true);
+    const cmtLen     = view.getUint16(off + 32, true);
+    const fullName   = dec.decode(bytes.slice(off + 46, off + 46 + fnLen));
+    const base       = fullName.split("/").pop();
+    if (base.toLowerCase().endsWith(".pdf") && !fullName.includes("__MACOSX") && base.length > 0) {
+      out.push({ name: base, size: uncompSize });
+    }
+    off += 46 + fnLen + extraLen + cmtLen;
+  }
+  return out;
+}
+
+// ── ZIP file list ─────────────────────────────────────
+function ZipFileList({ files }) {
+  const shown = files.slice(0, 50);
+  return (
+    <div style={{ background: "#fff", border: "1px solid rgba(10,15,30,0.08)", borderRadius: 16, overflow: "hidden", boxShadow: "0 1px 3px rgba(10,15,30,0.06)" }}>
+      <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(10,15,30,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#0A0F1E" }}>📁 Archivos detectados ({files.length} PDFs)</div>
+        {files.length > shown.length && (
+          <span style={{ fontSize: 11, color: "#8494A8" }}>mostrando {shown.length} de {files.length}</span>
+        )}
+      </div>
+      <div style={{ maxHeight: 260, overflowY: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "#F6F8FB" }}>
+              {["", "Nombre del archivo", "Tamaño"].map((h, i) => (
+                <th key={i} style={{ padding: "8px 16px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "#8494A8", textTransform: "uppercase", letterSpacing: 0.8, borderBottom: "1px solid rgba(10,15,30,0.06)" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((f, i) => (
+              <tr key={i} style={{ background: i % 2 ? "rgba(246,248,251,0.4)" : "#fff" }}>
+                <td style={{ padding: "8px 16px", fontSize: 15 }}>📄</td>
+                <td style={{ padding: "8px 16px", color: "#2D3A52", fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>{f.name}</td>
+                <td style={{ padding: "8px 16px", color: "#8494A8", fontSize: 11, whiteSpace: "nowrap" }}>{f.size > 0 ? `${Math.round(f.size / 1024)} KB` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 // ── Drop zone ─────────────────────────────────────────
 function DropZone({ file, onFile }) {
@@ -111,6 +183,7 @@ function ProgressBar({ current, total }) {
 // ── Page ──────────────────────────────────────────────
 export default function NexificarIA() {
   const [file, setFile]               = useState(null);
+  const [zipFiles, setZipFiles]       = useState([]);
   const [instruccion, setInstruccion] = useState("");
   const [phase, setPhase]             = useState("upload"); // upload | loading_preview | preview | loading_ejecutar | done
   const [previewData, setPreviewData] = useState(null);    // {total_pdfs, preview[]}
@@ -118,6 +191,17 @@ export default function NexificarIA() {
   const [resultado, setResultado]     = useState(null);    // {blob, ok, errores}
   const [error, setError]             = useState(null);
   const intervalRef                   = useRef(null);
+
+  const handleFileSelect = async (f) => {
+    setFile(f);
+    setZipFiles([]);
+    try {
+      const buf = await f.arrayBuffer();
+      setZipFiles(parseZipFiles(buf));
+    } catch {
+      // proceed without file list if parse fails
+    }
+  };
 
   // Simulated progress counter
   useEffect(() => {
@@ -176,6 +260,7 @@ export default function NexificarIA() {
 
   const handleReset = () => {
     setFile(null);
+    setZipFiles([]);
     setInstruccion("");
     setPhase("upload");
     setPreviewData(null);
@@ -204,19 +289,23 @@ export default function NexificarIA() {
             {/* Upload zone */}
             <div style={{ background: "#fff", border: "1px solid rgba(10,15,30,0.08)", borderRadius: 16, padding: 24, boxShadow: "0 1px 3px rgba(10,15,30,0.06)" }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 12 }}>📦 Archivo ZIP</div>
-              <DropZone file={file} onFile={setFile} />
+              <DropZone file={file} onFile={handleFileSelect} />
             </div>
 
-            {/* Instrucción */}
+            {/* Detected files list */}
+            {zipFiles.length > 0 && <ZipFileList files={zipFiles} />}
+
+            {/* Instrucción — solo visible cuando hay archivos detectados */}
+            {zipFiles.length > 0 && (
             <div style={{ background: "#fff", border: "1px solid rgba(10,15,30,0.08)", borderRadius: 16, padding: 24, boxShadow: "0 1px 3px rgba(10,15,30,0.06)" }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 12 }}>💬 Instrucción para la IA</div>
 
               <textarea
                 value={instruccion}
                 onChange={e => setInstruccion(e.target.value)}
-                rows={3}
-                placeholder="Ej: Busca la cédula del beneficiario en el documento y renombra el archivo como: [cédula sin puntos] Habitabilidad"
-                style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid rgba(10,15,30,0.12)", fontSize: 13, fontFamily: "inherit", color: "#0A0F1E", resize: "vertical", outline: "none", boxSizing: "border-box", lineHeight: 1.5 }}
+                rows={4}
+                placeholder={"Ej: Renombra cada PDF con la cédula del beneficiario + Habitabilidad\nEj: Une los archivos que comparten el mismo número, ESC va primero que PYS, nómbralo con ese número"}
+                style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid rgba(10,15,30,0.12)", fontSize: 13, fontFamily: "inherit", color: "#0A0F1E", resize: "vertical", outline: "none", boxSizing: "border-box", lineHeight: 1.6 }}
               />
 
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
@@ -233,6 +322,7 @@ export default function NexificarIA() {
                 </select>
               </div>
             </div>
+            )}
 
             {error && (
               <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#EF4444", fontWeight: 600 }}>
@@ -240,6 +330,7 @@ export default function NexificarIA() {
               </div>
             )}
 
+            {zipFiles.length > 0 && (
             <button
               onClick={handlePreview}
               disabled={!canPreview || phase === "loading_preview"}
@@ -254,6 +345,7 @@ export default function NexificarIA() {
             >
               {phase === "loading_preview" ? "⟳ Generando vista previa…" : "👁 Vista previa"}
             </button>
+            )}
           </>
         )}
 
