@@ -6,7 +6,7 @@ import re
 import fitz  # PyMuPDF
 from PyPDF2 import PdfMerger
 from anthropic import Anthropic
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -28,7 +28,11 @@ def health():
 
 
 @app.post("/api/validate")
-async def validate_pdf(file: UploadFile = File(...)):
+async def validate_pdf(
+    file: UploadFile = File(...),
+    tipo_tramite: str = Form("Desembolso Colsubsidio"),
+    criterios: str = Form(""),
+):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
 
@@ -40,11 +44,14 @@ async def validate_pdf(file: UploadFile = File(...)):
     doc.close()
 
     text_preview = text[:8000]
+    criterios_extra = f"\n\nCriterios adicionales del analista:\n{criterios}" if criterios.strip() else ""
 
     prompt = f"""Eres un experto en validación de documentos de desembolsos para Colsubsidio.
 
+Tipo de trámite: {tipo_tramite}
+
 Analiza el siguiente texto extraído de un documento PDF y valida si cumple con los criterios
-de desembolsos de Colsubsidio (cedula, carta laboral, desprendible de nómina, pagaré, etc.).
+de desembolsos de Colsubsidio (cédula, carta laboral, desprendible de nómina, pagaré, etc.).{criterios_extra}
 
 Texto del documento:
 {text_preview}

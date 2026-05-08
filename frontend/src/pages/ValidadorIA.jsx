@@ -1,285 +1,30 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
+import { validatePDF } from "../services/api";
 
-// ── Data ──────────────────────────────────────────────
-const FINDINGS = [
-  { id: 1, severity: "high",   title: "Cédula duplicada en varias páginas", description: "El número 1.082.934.221 aparece como comprador en pág. 14 y también como testigo en pág. 23.", page: 14, rule: "coherencia_identidad" },
-  { id: 2, severity: "medium", title: "Página 7 escaneada borrosa",        description: "Calidad OCR baja (62%) — algunas cláusulas podrían no ser extraídas correctamente.", page: 7, rule: "calidad_ocr" },
-  { id: 3, severity: "medium", title: "Fecha de firma fuera de rango",     description: "La fecha del contrato (12/ene/2026) es anterior al avalúo (03/feb/2026).", page: 14, rule: "coherencia_fechas" },
-  { id: 4, severity: "low",    title: "Metadato de autor sin limpiar",     description: "El archivo contiene el autor original del PDF. Recomendamos limpiarlo antes de archivar.", page: 1, rule: "privacidad_metadata" },
-  { id: 5, severity: "ok",     title: "Firmas digitales válidas",          description: "Ambas firmas tienen certificado vigente y cadena de confianza verificada.", page: 14, rule: "firmas_digitales" },
-];
-
-const CHECKS = [
-  { category: "Integridad", status: "ok",   label: "Archivo no corrupto",           detail: "48 págs" },
-  { category: "Integridad", status: "ok",   label: "Páginas en orden secuencial" },
-  { category: "Integridad", status: "warn", label: "1 página con OCR baja calidad", detail: "pág. 7" },
-  { category: "Datos",      status: "warn", label: "Cédula duplicada",               detail: "págs. 14, 23" },
-  { category: "Datos",      status: "ok",   label: "Fechas formato ISO" },
-  { category: "Datos",      status: "ok",   label: "Montos coherentes" },
-  { category: "Firmas",     status: "ok",   label: "2 firmas digitales válidas" },
-  { category: "Firmas",     status: "ok",   label: "Certificados vigentes" },
-  { category: "Privacidad", status: "warn", label: "Metadato autor sin limpiar" },
-  { category: "Privacidad", status: "ok",   label: "Sin datos GPS embebidos" },
-];
-
-const ANNOTATIONS = {
-  7:  [{ type: "warn",   top: 25, left: 10, width: 80, height: 18, label: "⚠ OCR 62%", note: "Calidad baja — algunas cláusulas podrían haberse extraído incorrectamente." }],
-  14: [
-    { type: "danger", top: 72, left: 10, width: 38, height: 10, label: "✕ Cédula duplicada", note: "Aparece también como testigo en pág. 23." },
-    { type: "warn",   top: 6,  left: 54, width: 30, height: 5,  label: "⚠ Fecha inconsistente", note: "Anterior al avalúo (03/feb/2026)." },
-  ],
+// ── Severity helpers ──────────────────────────────────
+const SEV_MAP = { error: "high", advertencia: "medium", ok: "ok" };
+const SEV_TONES = {
+  high:   { bg: "rgba(239,68,68,0.06)",  bd: "rgba(239,68,68,0.22)",  fg: "#EF4444", icon: "✕", label: "Crítico" },
+  medium: { bg: "rgba(245,158,11,0.06)", bd: "rgba(245,158,11,0.22)", fg: "#F59E0B", icon: "!",  label: "Advertencia" },
+  low:    { bg: "rgba(0,194,203,0.05)",  bd: "rgba(0,194,203,0.2)",   fg: "#00C2CB", icon: "i",  label: "Bajo" },
+  ok:     { bg: "rgba(16,185,129,0.05)", bd: "rgba(16,185,129,0.2)",  fg: "#10B981", icon: "✓", label: "OK" },
 };
 
-const RECENT_DOCS = [
-  { name: "expediente_042.pdf",        score: 97, active: true },
-  { name: "contrato_vivienda_8821.pdf", score: 94, active: false },
-  { name: "poliza_seguros_2031.pdf",   score: 82, active: false },
-  { name: "avaluo_inmueble_77.pdf",    score: 99, active: false },
-  { name: "acta_entrega_551.pdf",      score: 91, active: false },
-];
+const RESULTADO_STYLES = {
+  APROBADO:                    { bg: "rgba(16,185,129,0.12)",  fg: "#10B981", icon: "✓" },
+  APROBADO_CON_OBSERVACIONES:  { bg: "rgba(245,158,11,0.12)",  fg: "#F59E0B", icon: "⚠" },
+  RECHAZADO:                   { bg: "rgba(239,68,68,0.12)",   fg: "#EF4444", icon: "✕" },
+};
 
-const INITIAL_CHAT = [
-  { role: "system", text: "Validación completada · 48 páginas · 3 hallazgos requieren atención" },
-  { role: "ai", text: "Hola Ana María. He analizado el expediente_042.pdf y encontré 3 observaciones relevantes: una cédula duplicada entre páginas 14 y 23, un posible problema de OCR en la página 7, y una inconsistencia de fechas entre el contrato y el avalúo. ¿Por dónde quieres empezar?", refs: ["pág. 14", "pág. 7", "pág. 23"] },
-  { role: "user", text: "Muéstrame la firma de la página 14, ¿es válida?" },
-  { role: "ai", text: "Sí, ambas firmas de la página 14 son válidas: tienen certificado digital vigente y la cadena de confianza se verifica contra la Cámara de Comercio. La firma del comprador coincide con la cédula 1.082.934.221 — pero precisamente esa cédula aparece también como testigo en la página 23, lo cual es inusual.", refs: ["pág. 14 · firmas", "pág. 23"] },
-];
-
-// ── Annotation overlay ────────────────────────────────
-function Annotation({ type, top, left, width, height, label }) {
-  const tones = {
-    warn:   { stroke: "#F59E0B", fill: "rgba(245,158,11,0.18)", labelBg: "#F59E0B", labelFg: "#0A0F1E" },
-    danger: { stroke: "#EF4444", fill: "rgba(239,68,68,0.18)",  labelBg: "#EF4444", labelFg: "#fff" },
-    info:   { stroke: "#00C2CB", fill: "rgba(0,194,203,0.18)",  labelBg: "#00C2CB", labelFg: "#0A0F1E" },
-  };
-  const t = tones[type] || tones.info;
-  return (
-    <div style={{
-      position: "absolute", top: `${top}%`, left: `${left}%`,
-      width: `${width}%`, height: `${height}%`,
-      border: `2px solid ${t.stroke}`, background: t.fill,
-      borderRadius: 4, animation: "nx-annot-flash 2.5s infinite",
-    }}>
-      <div style={{ position: "absolute", top: -24, left: -2, background: t.labelBg, color: t.labelFg, fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: "4px 4px 4px 0", whiteSpace: "nowrap" }}>{label}</div>
-    </div>
-  );
-}
-
-// ── PDF Viewer ────────────────────────────────────────
-function PdfViewer({ currentPage, setCurrentPage }) {
-  const totalPages = 48;
-  const annotations = ANNOTATIONS[currentPage] || [];
-
-  const ToolBtn = ({ icon, label, tone, onClick }) => {
-    const [hover, setHover] = useState(false);
-    const bg = tone === "accent" ? (hover ? "linear-gradient(135deg,#00C2CB,#0099FF)" : "rgba(0,194,203,0.15)") : (hover ? "rgba(255,255,255,0.1)" : "transparent");
-    const color = tone === "accent" ? (hover ? "#0A0F1E" : "#00C2CB") : "rgba(255,255,255,0.75)";
-    return (
-      <button onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} title={label} style={{ width: 30, height: 30, borderRadius: 7, border: "none", background: bg, color, fontSize: 14, fontWeight: 700, cursor: "pointer", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}>{icon}</button>
-    );
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#2D3A52" }}>
-      {/* Toolbar */}
-      <div style={{ height: 48, background: "#1A2234", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px", color: "#fff", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <ToolBtn icon="◀" onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} />
-          <div style={{ background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: "4px 12px", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: "#fff", minWidth: 78, textAlign: "center" }}>
-            <span style={{ color: "#00C2CB" }}>{String(currentPage).padStart(2, "0")}</span>
-            <span style={{ color: "rgba(255,255,255,0.4)" }}> / {totalPages}</span>
-          </div>
-          <ToolBtn icon="▶" onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))} />
-          <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.08)" }} />
-          <ToolBtn icon="−" label="Zoom out" />
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", fontFamily: "'JetBrains Mono', monospace", minWidth: 42, textAlign: "center" }}>100%</div>
-          <ToolBtn icon="+" label="Zoom in" />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>expediente_042.pdf</div>
-          <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.08)" }} />
-          <ToolBtn icon="⤓" label="Descargar" />
-          <ToolBtn icon="⚡" label="Re-validar" tone="accent" />
-        </div>
-      </div>
-
-      {/* Page area */}
-      <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "28px 0", backgroundImage: "radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px)", backgroundSize: "18px 18px" }}>
-        <div style={{ width: 520, background: "#fff", borderRadius: 6, boxShadow: "0 12px 48px rgba(0,0,0,0.4)", position: "relative", overflow: "hidden", aspectRatio: "0.77" }}>
-          <div style={{ padding: "36px 48px 0" }}>
-            <div style={{ fontSize: 9, color: "#8494A8", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 5 }}>Constructora Bolívar S.A.</div>
-            <div style={{ height: 16, width: "75%", background: "#0A0F1E", borderRadius: 2, marginBottom: 5 }} />
-            <div style={{ height: 9, width: "55%", background: "rgba(10,15,30,0.5)", borderRadius: 1 }} />
-            <div style={{ fontSize: 8, color: "#8494A8", marginTop: 10, fontFamily: "'JetBrains Mono', monospace" }}>EXP-2026-042 · Página {currentPage} de 48</div>
-          </div>
-          <div style={{ padding: "20px 48px" }}>
-            {Array.from({ length: 18 }).map((_, i) => (
-              <div key={i} style={{ height: 5, borderRadius: 1, marginBottom: 6, background: "rgba(10,15,30,0.12)", width: `${95 - (i % 5) * 8}%` }} />
-            ))}
-          </div>
-          {currentPage === 14 && (
-            <div style={{ position: "absolute", bottom: 70, left: 48, right: 48 }}>
-              <div style={{ fontSize: 8, color: "#8494A8", marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>Firmas</div>
-              <div style={{ display: "flex", gap: 16 }}>
-                <div style={{ flex: 1, borderTop: "1px solid #0A0F1E", paddingTop: 5 }}>
-                  <div style={{ fontSize: 7, color: "#8494A8" }}>Comprador</div>
-                  <div style={{ fontSize: 9, fontWeight: 700, color: "#0A0F1E", marginTop: 2 }}>C.C. 1.082.934.221</div>
-                </div>
-                <div style={{ flex: 1, borderTop: "1px solid #0A0F1E", paddingTop: 5 }}>
-                  <div style={{ fontSize: 7, color: "#8494A8" }}>Representante legal</div>
-                  <div style={{ fontSize: 9, fontWeight: 700, color: "#0A0F1E", marginTop: 2 }}>Apoderado CB</div>
-                </div>
-              </div>
-            </div>
-          )}
-          {annotations.map((a, i) => <Annotation key={i} {...a} />)}
-        </div>
-      </div>
-
-      {/* Thumbnail strip */}
-      <div style={{ height: 88, background: "#1A2234", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", gap: 8, padding: "10px 16px", overflowX: "auto", flexShrink: 0 }}>
-        {Array.from({ length: 12 }).map((_, i) => {
-          const page = i + 1;
-          const isActive = page === currentPage;
-          const hasIssue = ANNOTATIONS[page]?.length > 0;
-          return (
-            <div key={page} onClick={() => setCurrentPage(page)} style={{ flexShrink: 0, width: 50, aspectRatio: "0.77", background: "#fff", borderRadius: 5, cursor: "pointer", border: isActive ? "2px solid #00C2CB" : "1px solid rgba(255,255,255,0.12)", boxShadow: isActive ? "0 0 14px rgba(0,194,203,0.5)" : "none", position: "relative", padding: 4, transition: "all .15s" }}>
-              <div style={{ height: "100%", width: "100%", backgroundImage: "repeating-linear-gradient(180deg,transparent 0 4px,rgba(10,15,30,0.12) 4px 5px)", backgroundPosition: "0 6px" }} />
-              <div style={{ position: "absolute", bottom: -16, left: 0, right: 0, textAlign: "center", fontSize: 9, fontWeight: 700, color: isActive ? "#00C2CB" : "rgba(255,255,255,0.5)" }}>{page}</div>
-              {hasIssue && <div style={{ position: "absolute", top: -4, right: -4, width: 14, height: 14, borderRadius: "50%", background: "#F59E0B", color: "#0A0F1E", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 0 2px #1A2234" }}>!</div>}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── Findings panel ────────────────────────────────────
-function FindingRow({ f, selected, onClick }) {
-  const [hover, setHover] = useState(false);
-  const tones = {
-    high:   { bg: "rgba(239,68,68,0.06)",  bd: "rgba(239,68,68,0.22)",  fg: "#EF4444", icon: "✕" },
-    medium: { bg: "rgba(245,158,11,0.06)", bd: "rgba(245,158,11,0.22)", fg: "#F59E0B", icon: "!" },
-    low:    { bg: "rgba(0,194,203,0.05)",  bd: "rgba(0,194,203,0.2)",   fg: "#00C2CB", icon: "i" },
-    ok:     { bg: "rgba(16,185,129,0.05)", bd: "rgba(16,185,129,0.2)",  fg: "#10B981", icon: "✓" },
-  };
-  const t = tones[f.severity];
-  const isActive = selected || hover;
-  return (
-    <div onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{ background: isActive ? t.bg : "#fff", border: `1px solid ${isActive ? t.bd : "rgba(10,15,30,0.08)"}`, borderRadius: 11, padding: "10px 12px", cursor: "pointer", transition: "all .15s", boxShadow: selected ? `0 2px 12px ${t.bd}` : "none", marginBottom: 6 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-        <div style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, background: t.fg, color: f.severity === "high" ? "#fff" : "#0A0F1E", fontSize: 11, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>{t.icon}</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#0A0F1E" }}>{f.title}</div>
-            <span style={{ fontSize: 9, color: t.fg, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.6, padding: "1px 6px", background: t.bg, borderRadius: 4 }}>
-              {f.severity === "high" ? "Crítico" : f.severity === "medium" ? "Medio" : f.severity === "low" ? "Bajo" : "OK"}
-            </span>
-          </div>
-          <div style={{ fontSize: 11, color: "#556070", lineHeight: 1.45, marginBottom: 5 }}>{f.description}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10, color: "#8494A8" }}>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", color: t.fg, fontWeight: 700 }}>Pág. {f.page}</span>
-            <span>·</span>
-            <span>{f.rule}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ChecksList() {
-  const grouped = CHECKS.reduce((acc, c) => { (acc[c.category] ||= []).push(c); return acc; }, {});
-  return (
-    <div>
-      <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 10 }}>🔍 Chequeos automáticos</div>
-      <div style={{ background: "#F6F8FB", borderRadius: 12, padding: 12 }}>
-        {Object.entries(grouped).map(([cat, items], gi, arr) => (
-          <div key={cat} style={{ marginBottom: gi < arr.length - 1 ? 12 : 0 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#8494A8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{cat}</div>
-            {items.map((c, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12 }}>
-                <span style={{ width: 16, height: 16, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, flexShrink: 0, background: c.status === "ok" ? "rgba(16,185,129,0.16)" : c.status === "warn" ? "rgba(245,158,11,0.16)" : "rgba(239,68,68,0.16)", color: c.status === "ok" ? "#10B981" : c.status === "warn" ? "#F59E0B" : "#EF4444" }}>
-                  {c.status === "ok" ? "✓" : c.status === "warn" ? "!" : "✕"}
-                </span>
-                <span style={{ color: "#2D3A52", flex: 1 }}>{c.label}</span>
-                {c.detail && <span style={{ fontSize: 10, color: "#8494A8", fontFamily: "'JetBrains Mono', monospace" }}>{c.detail}</span>}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ChatPanel() {
-  const [messages, setMessages] = useState(INITIAL_CHAT);
-  const [input, setInput] = useState("");
-  const suggestions = ["¿Qué páginas necesitan revisión?", "Extrae los datos del comprador", "Resume las cláusulas de la página 14", "Compara firmas con el expediente anterior"];
-
-  const send = (text) => {
-    const t = (text ?? input).trim();
-    if (!t) return;
-    setMessages(ms => [...ms, { role: "user", text: t }, { role: "ai", typing: true }]);
-    setInput("");
-    setTimeout(() => {
-      setMessages(ms => ms.slice(0, -1).concat({ role: "ai", text: "He revisado los fragmentos relevantes. Puedo generarte un resumen de las cláusulas económicas o abrir el fragmento en el visor — dime qué prefieres." }));
-    }, 1200);
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-        <span>💬 Conversar con la IA</span>
-        <span style={{ fontSize: 9, padding: "1px 7px", background: "rgba(16,185,129,0.15)", color: "#10B981", borderRadius: 999, fontWeight: 700 }}>● EN LÍNEA</span>
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", paddingRight: 4, minHeight: 200 }}>
-        {messages.map((m, i) => {
-          if (m.role === "system") return (
-            <div key={i} style={{ background: "rgba(0,194,203,0.05)", border: "1px solid rgba(0,194,203,0.15)", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#556070", marginBottom: 10, textAlign: "center" }}>{m.text}</div>
-          );
-          return (
-            <div key={i} style={{ marginBottom: 10, display: "flex", gap: 8, alignItems: "flex-start", flexDirection: m.role === "user" ? "row-reverse" : "row" }}>
-              {m.role === "ai" && <div style={{ width: 26, height: 26, borderRadius: 7, background: "linear-gradient(135deg,#00C2CB,#0099FF)", color: "#0A0F1E", fontSize: 12, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>⚡</div>}
-              {m.role === "user" && <div style={{ width: 26, height: 26, borderRadius: "50%", background: "#0A0F1E", color: "#fff", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>AM</div>}
-              <div style={{ background: m.role === "user" ? "#0A0F1E" : "#fff", color: m.role === "user" ? "#fff" : "#2D3A52", border: m.role === "user" ? "none" : "1px solid rgba(10,15,30,0.08)", borderRadius: m.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px", padding: "9px 12px", fontSize: 12.5, lineHeight: 1.5, maxWidth: "84%" }}>
-                {m.typing ? (
-                  <div style={{ display: "flex", gap: 4, padding: "2px 4px" }}>
-                    {[0, 1, 2].map(j => <span key={j} style={{ width: 6, height: 6, borderRadius: "50%", background: "#00C2CB", animation: `nx-typing 1.2s ${j * 0.15}s infinite`, display: "inline-block" }} />)}
-                  </div>
-                ) : (
-                  <>
-                    {m.text}
-                    {m.refs && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-                      {m.refs.map((r, j) => <span key={j} style={{ fontSize: 10, padding: "2px 8px", background: "rgba(0,194,203,0.1)", color: "#00C2CB", borderRadius: 999, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>📎 {r}</span>)}
-                    </div>}
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10, marginBottom: 8 }}>
-        {suggestions.map(s => <button key={s} onClick={() => send(s)} style={{ background: "rgba(0,194,203,0.06)", color: "#00C2CB", border: "1px solid rgba(0,194,203,0.22)", borderRadius: 999, padding: "4px 10px", fontSize: 10.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>{s}</button>)}
-      </div>
-      <div style={{ background: "#F6F8FB", border: "1px solid rgba(10,15,30,0.08)", borderRadius: 12, padding: 8, display: "flex", alignItems: "flex-end", gap: 8 }}>
-        <textarea value={input} rows={2} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Pregunta algo sobre el documento…" style={{ flex: 1, border: "none", background: "transparent", fontFamily: "inherit", fontSize: 12, color: "#0A0F1E", resize: "none", outline: "none", padding: "4px 8px", lineHeight: 1.45 }} />
-        <button onClick={() => send()} style={{ background: "linear-gradient(135deg,#00C2CB,#0099FF)", color: "#0A0F1E", padding: "8px 14px", borderRadius: 8, border: "none", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>→ Enviar</button>
-      </div>
-      <div style={{ fontSize: 10, color: "#8494A8", marginTop: 6, textAlign: "center" }}>Claude Sonnet 4.6 · las respuestas pueden contener imprecisiones</div>
-    </div>
-  );
+function mapHallazgo(h, i) {
+  return { id: i + 1, severity: SEV_MAP[h.tipo] || "low", title: h.campo || "Hallazgo", description: h.descripcion, rule: h.tipo };
 }
 
 // ── Score ring ────────────────────────────────────────
 function ScoreRing({ score }) {
   const r = 22, c = 2 * Math.PI * r;
   const offset = c - (score / 100) * c;
-  const color = score > 95 ? "#10B981" : score > 85 ? "#00C2CB" : "#F59E0B";
+  const color = score > 90 ? "#10B981" : score > 75 ? "#00C2CB" : "#F59E0B";
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
       <div style={{ position: "relative", width: 52, height: 52 }}>
@@ -289,9 +34,308 @@ function ScoreRing({ score }) {
         </svg>
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: "#0A0F1E", letterSpacing: -0.3 }}>{score}%</div>
       </div>
-      <div>
-        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.9, color: "#8494A8" }}>Score de validación</div>
-        <div style={{ fontSize: 12, color: "#0A0F1E", fontWeight: 700 }}>3 observaciones · <span style={{ color: "#10B981" }}>listo para aprobar</span></div>
+    </div>
+  );
+}
+
+// ── Upload phase ──────────────────────────────────────
+function UploadForm({ file, setFile, tipoTramite, setTipoTramite, criterios, setCriterios, onRun, error, loading }) {
+  const fileRef = useRef(null);
+  const [drag, setDrag] = useState(false);
+
+  const pickFile = (f) => {
+    if (f && f.name.toLowerCase().endsWith(".pdf")) setFile(f);
+  };
+
+  return (
+    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 40, background: "#F6F8FB" }}>
+      <div style={{ width: "100%", maxWidth: 580, background: "#fff", borderRadius: 20, border: "1px solid rgba(10,15,30,0.08)", boxShadow: "0 4px 24px rgba(10,15,30,0.06)", overflow: "hidden" }}>
+        {/* Header */}
+        <div style={{ background: "linear-gradient(135deg,#0A0F1E,#1A2234)", padding: "28px 32px", color: "#fff" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 14, background: "linear-gradient(135deg,#00C2CB,#0099FF)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 900, color: "#0A0F1E", boxShadow: "0 0 24px rgba(0,194,203,0.5)", animation: "nx-pulse 3s infinite" }}>⚡</div>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.6, marginBottom: 3 }}>Validador IA · Claude Sonnet 4.6</div>
+              <div style={{ fontSize: 20, fontWeight: 800 }}>Nueva validación de expediente</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
+          {/* Drop zone */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "#556070", textTransform: "uppercase", letterSpacing: 0.8, display: "block", marginBottom: 8 }}>Documento PDF</label>
+            <div
+              onClick={() => fileRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setDrag(true); }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={e => { e.preventDefault(); setDrag(false); pickFile(e.dataTransfer.files[0]); }}
+              style={{
+                border: `2px dashed ${drag ? "#00C2CB" : file ? "#10B981" : "rgba(10,15,30,0.15)"}`,
+                borderRadius: 14, padding: "28px 20px", textAlign: "center", cursor: "pointer",
+                background: drag ? "rgba(0,194,203,0.04)" : file ? "rgba(16,185,129,0.04)" : "#F6F8FB",
+                transition: "all .2s",
+              }}
+            >
+              <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }} onChange={e => pickFile(e.target.files[0])} />
+              {file ? (
+                <>
+                  <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#10B981" }}>{file.name}</div>
+                  <div style={{ fontSize: 11, color: "#8494A8", marginTop: 4 }}>{(file.size / 1024 / 1024).toFixed(2)} MB · Haz clic para cambiar</div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>☁️</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#2D3A52" }}>Arrastra tu PDF aquí o haz clic</div>
+                  <div style={{ fontSize: 11, color: "#8494A8", marginTop: 4 }}>Solo archivos PDF · máx. 20 MB</div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Tipo trámite */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "#556070", textTransform: "uppercase", letterSpacing: 0.8, display: "block", marginBottom: 8 }}>Tipo de trámite</label>
+            <select
+              value={tipoTramite}
+              onChange={e => setTipoTramite(e.target.value)}
+              style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(10,15,30,0.12)", fontSize: 13, fontFamily: "inherit", color: "#0A0F1E", background: "#fff", outline: "none", cursor: "pointer" }}
+            >
+              <option>Desembolso Subsidio Colsubsidio</option>
+              <option>Desembolso Caja Compensación</option>
+              <option>Personalizado</option>
+            </select>
+          </div>
+
+          {/* Criterios */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "#556070", textTransform: "uppercase", letterSpacing: 0.8, display: "block", marginBottom: 8 }}>Criterios adicionales <span style={{ fontWeight: 400, textTransform: "none" }}>(opcional)</span></label>
+            <textarea
+              value={criterios}
+              onChange={e => setCriterios(e.target.value)}
+              rows={3}
+              placeholder="Ej: Verificar que el pagaré esté firmado por ambas partes. Confirmar vigencia de la carta laboral…"
+              style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(10,15,30,0.12)", fontSize: 13, fontFamily: "inherit", color: "#0A0F1E", resize: "vertical", outline: "none", boxSizing: "border-box" }}
+            />
+          </div>
+
+          {error && (
+            <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#EF4444", fontWeight: 600 }}>
+              ✕ {error}
+            </div>
+          )}
+
+          {/* CTA */}
+          <button
+            onClick={onRun}
+            disabled={!file || loading}
+            style={{
+              width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: file ? "pointer" : "not-allowed",
+              background: file ? "linear-gradient(135deg,#00C2CB,#0099FF)" : "rgba(10,15,30,0.08)",
+              color: file ? "#0A0F1E" : "#8494A8", fontSize: 15, fontWeight: 800, fontFamily: "inherit",
+              boxShadow: file ? "0 4px 18px rgba(0,194,203,0.35)" : "none",
+              transition: "all .2s",
+            }}
+          >
+            {loading ? "Analizando…" : "⚡ Ejecutar Validación IA"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Loading phase ─────────────────────────────────────
+function LoadingView({ filename }) {
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, background: "#F6F8FB" }}>
+      <div style={{ width: 64, height: 64, borderRadius: 18, background: "linear-gradient(135deg,#00C2CB,#0099FF)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 900, color: "#0A0F1E", boxShadow: "0 0 32px rgba(0,194,203,0.5)", animation: "nx-pulse 1.5s infinite" }}>⚡</div>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#0A0F1E", marginBottom: 6 }}>Analizando con IA…</div>
+        <div style={{ fontSize: 13, color: "#556070" }}>Claude Sonnet 4.6 está revisando <strong>{filename}</strong></div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        {["Extrayendo texto", "Analizando criterios", "Generando reporte"].map((s, i) => (
+          <div key={s} style={{ padding: "6px 14px", borderRadius: 999, background: "#fff", border: "1px solid rgba(10,15,30,0.08)", fontSize: 11, color: "#8494A8", fontWeight: 600, animation: `nx-typing 1.5s ${i * 0.4}s infinite` }}>{s}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Result finding row ────────────────────────────────
+function FindingRow({ f }) {
+  const [hover, setHover] = useState(false);
+  const t = SEV_TONES[f.severity] || SEV_TONES.low;
+  return (
+    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{ background: hover ? t.bg : "#fff", border: `1px solid ${hover ? t.bd : "rgba(10,15,30,0.08)"}`, borderRadius: 11, padding: "10px 12px", transition: "all .15s", marginBottom: 6 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <div style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, background: t.fg, color: f.severity === "high" ? "#fff" : "#0A0F1E", fontSize: 11, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>{t.icon}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#0A0F1E" }}>{f.title}</div>
+            <span style={{ fontSize: 9, color: t.fg, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.6, padding: "1px 6px", background: t.bg, borderRadius: 4 }}>{t.label}</span>
+          </div>
+          <div style={{ fontSize: 11, color: "#556070", lineHeight: 1.45 }}>{f.description}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Result view ───────────────────────────────────────
+function ResultView({ result, onReset, onDownload }) {
+  const [tab, setTab] = useState("hallazgos");
+  const findings = (result.hallazgos || []).map(mapHallazgo);
+  const resultStyle = RESULTADO_STYLES[result.resultado_general] || RESULTADO_STYLES.APROBADO_CON_OBSERVACIONES;
+  const errorCount = findings.filter(f => f.severity === "high").length;
+
+  const TABS = [
+    { key: "hallazgos",       label: "Hallazgos",    badge: findings.filter(f => f.severity !== "ok").length || null },
+    { key: "documentos",      label: "Documentos",   badge: result.documentos_faltantes?.length || null },
+    { key: "recomendaciones", label: "Acciones",     badge: null },
+  ];
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      {/* Topbar */}
+      <div style={{ height: 64, background: "#fff", borderBottom: "1px solid rgba(10,15,30,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: "linear-gradient(135deg,#00C2CB,#0099FF)", color: "#0A0F1E", fontSize: 18, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 16px rgba(0,194,203,0.45)", animation: "nx-pulse 3s infinite" }}>⚡</div>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4 }}>Validador IA · resultado</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#0A0F1E", letterSpacing: -0.3 }}>
+              {result.filename}{" "}
+              <span style={{ fontSize: 11, color: "#8494A8", fontWeight: 500, fontFamily: "'JetBrains Mono', monospace" }}>{result.pages} págs.</span>
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <ScoreRing score={result.score} />
+          <span style={{ fontSize: 12, padding: "5px 12px", borderRadius: 999, fontWeight: 800, background: resultStyle.bg, color: resultStyle.fg }}>
+            {resultStyle.icon} {result.resultado_general?.replace(/_/g, " ")}
+          </span>
+          <button onClick={onDownload} style={{ background: "#fff", border: "1px solid rgba(10,15,30,0.12)", color: "#556070", padding: "8px 14px", borderRadius: 9, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>⤓ Descargar TXT</button>
+          <button onClick={onReset} style={{ background: "rgba(10,15,30,0.04)", border: "1px solid rgba(10,15,30,0.1)", color: "#556070", padding: "8px 14px", borderRadius: 9, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>＋ Nueva validación</button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "1fr 420px", overflow: "hidden" }}>
+        {/* Summary card (left) */}
+        <div style={{ background: "#F6F8FB", padding: 32, overflowY: "auto" }}>
+          {/* Score + resultado */}
+          <div style={{ background: "#fff", borderRadius: 16, border: "1px solid rgba(10,15,30,0.08)", padding: 24, marginBottom: 20, boxShadow: "0 1px 3px rgba(10,15,30,0.06)" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 16 }}>📊 Resumen de validación</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+              {[
+                { label: "Score IA",          value: `${result.score}%`,      color: result.score > 90 ? "#10B981" : result.score > 75 ? "#00C2CB" : "#F59E0B" },
+                { label: "Hallazgos críticos", value: errorCount,             color: errorCount > 0 ? "#EF4444" : "#10B981" },
+                { label: "Páginas analizadas", value: result.pages,           color: "#0A0F1E" },
+              ].map(kpi => (
+                <div key={kpi.label} style={{ textAlign: "center", padding: "16px 0", background: "#F6F8FB", borderRadius: 12 }}>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: kpi.color, letterSpacing: -1 }}>{kpi.value}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#8494A8", textTransform: "uppercase", letterSpacing: 0.8, marginTop: 4 }}>{kpi.label}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 16, padding: "12px 16px", borderRadius: 10, background: resultStyle.bg, border: `1px solid ${resultStyle.fg}33`, display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 18 }}>{resultStyle.icon}</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: resultStyle.fg }}>{result.resultado_general?.replace(/_/g, " ")}</div>
+                <div style={{ fontSize: 11, color: "#556070", marginTop: 2 }}>Determinación automática basada en criterios Colsubsidio</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Documentos faltantes */}
+          {result.documentos_faltantes?.length > 0 && (
+            <div style={{ background: "#fff", borderRadius: 16, border: "1px solid rgba(245,158,11,0.2)", padding: 20, marginBottom: 20 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#F59E0B", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 12 }}>📋 Documentos faltantes ({result.documentos_faltantes.length})</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {result.documentos_faltantes.map((d, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 12px", background: "rgba(245,158,11,0.05)", borderRadius: 8, border: "1px solid rgba(245,158,11,0.12)" }}>
+                    <span style={{ color: "#F59E0B", fontWeight: 800, flexShrink: 0 }}>⚠</span>
+                    <span style={{ fontSize: 13, color: "#2D3A52" }}>{d}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Recomendaciones */}
+          {result.recomendaciones?.length > 0 && (
+            <div style={{ background: "#fff", borderRadius: 16, border: "1px solid rgba(0,194,203,0.18)", padding: 20 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 12 }}>💡 Recomendaciones ({result.recomendaciones.length})</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {result.recomendaciones.map((r, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 12px", background: "rgba(0,194,203,0.04)", borderRadius: 8, border: "1px solid rgba(0,194,203,0.1)" }}>
+                    <span style={{ color: "#00C2CB", fontWeight: 800, flexShrink: 0 }}>→</span>
+                    <span style={{ fontSize: 13, color: "#2D3A52", lineHeight: 1.5 }}>{r}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right panel: hallazgos */}
+        <div style={{ background: "#fff", borderLeft: "1px solid rgba(10,15,30,0.06)", display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ display: "flex", gap: 4, padding: 12, borderBottom: "1px solid rgba(10,15,30,0.06)", flexShrink: 0 }}>
+            {TABS.map(t => {
+              const isActive = tab === t.key;
+              return (
+                <button key={t.key} onClick={() => setTab(t.key)} style={{ flex: 1, padding: "8px 10px", background: isActive ? "linear-gradient(135deg,#00C2CB,#0099FF)" : "transparent", color: isActive ? "#0A0F1E" : "#556070", border: "none", borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", boxShadow: isActive ? "0 4px 14px rgba(0,194,203,0.25)" : "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  {t.label}
+                  {t.badge ? <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 999, background: isActive ? "#0A0F1E" : "rgba(239,68,68,0.12)", color: isActive ? "#00C2CB" : "#EF4444", fontWeight: 800 }}>{t.badge}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: 14, minHeight: 0 }}>
+            {tab === "hallazgos" && (
+              <>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 10, display: "flex", justifyContent: "space-between" }}>
+                  <span>🎯 Hallazgos ({findings.length})</span>
+                  <span style={{ color: "#8494A8", fontWeight: 600, fontSize: 10, textTransform: "none" }}>ordenados por severidad</span>
+                </div>
+                {findings.length === 0 && <div style={{ textAlign: "center", color: "#8494A8", fontSize: 13, marginTop: 40 }}>No se encontraron hallazgos.</div>}
+                {findings.map(f => <FindingRow key={f.id} f={f} />)}
+              </>
+            )}
+            {tab === "documentos" && (
+              <>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#F59E0B", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 12 }}>📋 Documentos faltantes</div>
+                {(result.documentos_faltantes || []).length === 0
+                  ? <div style={{ textAlign: "center", color: "#10B981", fontSize: 13, marginTop: 40, fontWeight: 700 }}>✓ No faltan documentos.</div>
+                  : result.documentos_faltantes.map((d, i) => (
+                    <div key={i} style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(245,158,11,0.2)", background: "rgba(245,158,11,0.05)", marginBottom: 8, fontSize: 13, color: "#2D3A52" }}>
+                      <span style={{ color: "#F59E0B", fontWeight: 800, marginRight: 8 }}>⚠</span>{d}
+                    </div>
+                  ))
+                }
+              </>
+            )}
+            {tab === "recomendaciones" && (
+              <>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 12 }}>💡 Acciones recomendadas</div>
+                {(result.recomendaciones || []).length === 0
+                  ? <div style={{ textAlign: "center", color: "#8494A8", fontSize: 13, marginTop: 40 }}>Sin recomendaciones adicionales.</div>
+                  : result.recomendaciones.map((r, i) => (
+                    <div key={i} style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(0,194,203,0.15)", background: "rgba(0,194,203,0.04)", marginBottom: 8, fontSize: 13, color: "#2D3A52", lineHeight: 1.5 }}>
+                      <span style={{ color: "#00C2CB", fontWeight: 800, marginRight: 8 }}>→</span>{r}
+                    </div>
+                  ))
+                }
+                <button onClick={onDownload} style={{ width: "100%", marginTop: 12, padding: "12px", borderRadius: 10, border: "1px solid rgba(10,15,30,0.12)", background: "#fff", color: "#556070", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  ⤓ Descargar reporte completo TXT
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -299,19 +343,72 @@ function ScoreRing({ score }) {
 
 // ── Page ──────────────────────────────────────────────
 export default function ValidadorIA() {
-  const [currentPage, setCurrentPage] = useState(14);
-  const [selectedFinding, setSelectedFinding] = useState(1);
-  const [tab, setTab] = useState("findings");
+  const [phase, setPhase]           = useState("upload");
+  const [file, setFile]             = useState(null);
+  const [tipoTramite, setTipoTramite] = useState("Desembolso Subsidio Colsubsidio");
+  const [criterios, setCriterios]   = useState("");
+  const [result, setResult]         = useState(null);
+  const [error, setError]           = useState(null);
 
-  const tabs = [
-    { key: "findings", label: "Hallazgos", badge: 3 },
-    { key: "checks",   label: "Chequeos", badge: null },
-    { key: "chat",     label: "Conversar", badge: null },
-  ];
+  const run = async () => {
+    if (!file) return;
+    setPhase("loading");
+    setError(null);
+    try {
+      const data = await validatePDF(file, tipoTramite, criterios);
+      setResult(data);
+      setPhase("result");
+    } catch (e) {
+      setError(e.message || "Error al validar el documento");
+      setPhase("upload");
+    }
+  };
+
+  const reset = () => {
+    setPhase("upload");
+    setFile(null);
+    setCriterios("");
+    setResult(null);
+    setError(null);
+  };
+
+  const downloadTxt = () => {
+    if (!result) return;
+    const sep = "─".repeat(44);
+    const lines = [
+      "REPORTE DE VALIDACIÓN IA — NEXA",
+      "═".repeat(44),
+      `Archivo:   ${result.filename}`,
+      `Páginas:   ${result.pages}`,
+      `Score:     ${result.score}%`,
+      `Resultado: ${result.resultado_general}`,
+      "",
+      "HALLAZGOS",
+      sep,
+      ...(result.hallazgos || []).map(h => `[${h.tipo.toUpperCase()}] ${h.campo}\n  ${h.descripcion}`),
+      "",
+      "DOCUMENTOS FALTANTES",
+      sep,
+      ...(result.documentos_faltantes?.length ? result.documentos_faltantes.map(d => `• ${d}`) : ["Ninguno"]),
+      "",
+      "RECOMENDACIONES",
+      sep,
+      ...(result.recomendaciones || []).map(r => `• ${r}`),
+      "",
+      `Generado por NEXA · Claude Sonnet 4.6 · ${new Date().toLocaleString("es-CO")}`,
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `reporte_nexa_${result.filename?.replace(".pdf", "")}_${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-      {/* Validador Sidebar */}
+      {/* Sidebar */}
       <aside style={{ width: 240, minWidth: 240, background: "#0A0F1E", display: "flex", flexDirection: "column", height: "100vh", borderRight: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
         <div style={{ padding: "20px 18px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -323,81 +420,44 @@ export default function ValidadorIA() {
           </div>
         </div>
         <div style={{ padding: 14, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-          <button style={{ width: "100%", background: "linear-gradient(135deg,#00C2CB,#0099FF)", color: "#0A0F1E", padding: "10px 16px", borderRadius: 10, border: "none", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>＋ Nueva validación</button>
+          <button onClick={reset} style={{ width: "100%", background: "linear-gradient(135deg,#00C2CB,#0099FF)", color: "#0A0F1E", padding: "10px 16px", borderRadius: 10, border: "none", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>＋ Nueva validación</button>
         </div>
         <div style={{ padding: "14px 14px 8px", flex: 1, overflowY: "auto" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: 1.2, padding: "0 4px 10px" }}>Validaciones recientes</div>
-          {RECENT_DOCS.map((r, i) => (
-            <div key={i} style={{ padding: "9px 10px", borderRadius: 9, marginBottom: 3, cursor: "pointer", background: r.active ? "rgba(0,194,203,0.12)" : "transparent", border: r.active ? "1px solid rgba(0,194,203,0.3)" : "1px solid transparent" }}>
-              <div style={{ fontSize: 11, color: r.active ? "#fff" : "#C8D1E0", fontWeight: 600, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📄 {r.name}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ flex: 1, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
-                  <div style={{ width: `${r.score}%`, height: "100%", background: r.score > 95 ? "#10B981" : r.score > 85 ? "#00C2CB" : "#F59E0B" }} />
-                </div>
-                <div style={{ fontSize: 10, color: r.active ? "#00C2CB" : "rgba(255,255,255,0.5)", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>{r.score}%</div>
-              </div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: 1.2, padding: "0 4px 12px" }}>Estado actual</div>
+          <div style={{ padding: "12px 10px", borderRadius: 9, background: "rgba(0,194,203,0.08)", border: "1px solid rgba(0,194,203,0.2)" }}>
+            <div style={{ fontSize: 10, color: "#00C2CB", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+              {phase === "upload" ? "● Listo" : phase === "loading" ? "⟳ Procesando" : "✓ Completado"}
             </div>
-          ))}
+            {file && <div style={{ fontSize: 11, color: "#C8D1E0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📄 {file.name}</div>}
+            {result && (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
+                  <div style={{ width: `${result.score}%`, height: "100%", background: result.score > 90 ? "#10B981" : result.score > 75 ? "#00C2CB" : "#F59E0B" }} />
+                </div>
+                <div style={{ fontSize: 10, color: "#00C2CB", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, marginTop: 4 }}>{result.score}%</div>
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ padding: "12px 14px 18px", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer" }}>← Volver al Dashboard</div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", padding: "8px 10px", lineHeight: 1.4 }}>Claude Sonnet 4.6 · Colsubsidio criterios v1.0</div>
         </div>
       </aside>
 
       {/* Main */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        {/* Topbar */}
-        <div style={{ height: 64, background: "#fff", borderBottom: "1px solid rgba(10,15,30,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: "linear-gradient(135deg,#00C2CB,#0099FF)", color: "#0A0F1E", fontSize: 18, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 16px rgba(0,194,203,0.45)", animation: "nx-pulse 3s infinite" }}>⚡</div>
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4 }}>Validador IA · Constructora Bolívar</div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#0A0F1E", letterSpacing: -0.3 }}>expediente_042.pdf <span style={{ fontSize: 11, color: "#8494A8", fontWeight: 500, fontFamily: "'JetBrains Mono', monospace" }}>EXP-2026-042 · 48 págs · 2.4 MB</span></div>
-            </div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <ScoreRing score={97} />
-            <div style={{ display: "flex", gap: 8 }}>
-              <button style={{ background: "#fff", border: "1px solid rgba(10,15,30,0.12)", color: "#556070", padding: "8px 14px", borderRadius: 9, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>⤓ Exportar informe</button>
-              <button style={{ background: "linear-gradient(135deg,#00C2CB,#0099FF)", color: "#0A0F1E", padding: "8px 14px", borderRadius: 9, fontSize: 12, fontWeight: 800, cursor: "pointer", border: "none", fontFamily: "inherit" }}>✓ Aprobar expediente</button>
-            </div>
-          </div>
-        </div>
-
-        {/* Two-column layout */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", flex: 1, minHeight: 0, overflow: "hidden" }}>
-          <PdfViewer currentPage={currentPage} setCurrentPage={setCurrentPage} />
-
-          {/* Right panel */}
-          <div style={{ background: "#fff", borderLeft: "1px solid rgba(10,15,30,0.06)", display: "flex", flexDirection: "column", minHeight: 0 }}>
-            <div style={{ display: "flex", gap: 4, padding: 12, borderBottom: "1px solid rgba(10,15,30,0.06)", flexShrink: 0 }}>
-              {tabs.map(t => {
-                const isActive = tab === t.key;
-                return (
-                  <button key={t.key} onClick={() => setTab(t.key)} style={{ flex: 1, padding: "8px 10px", background: isActive ? "linear-gradient(135deg,#00C2CB,#0099FF)" : "transparent", color: isActive ? "#0A0F1E" : "#556070", border: "none", borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", boxShadow: isActive ? "0 4px 14px rgba(0,194,203,0.25)" : "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                    {t.label}
-                    {t.badge && <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 999, background: isActive ? "#0A0F1E" : "rgba(239,68,68,0.12)", color: isActive ? "#00C2CB" : "#EF4444", fontWeight: 800 }}>{t.badge}</span>}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ flex: 1, overflowY: "auto", padding: 16, minHeight: 0 }}>
-              {tab === "findings" && (
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#00C2CB", textTransform: "uppercase", letterSpacing: 1.4, marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span>🎯 Hallazgos ({FINDINGS.length})</span>
-                    <span style={{ color: "#8494A8", fontWeight: 600, fontSize: 10, textTransform: "none", letterSpacing: 0 }}>ordenados por severidad</span>
-                  </div>
-                  {FINDINGS.map(f => (
-                    <FindingRow key={f.id} f={f} selected={selectedFinding === f.id} onClick={() => { setSelectedFinding(f.id); setCurrentPage(f.page); }} />
-                  ))}
-                </div>
-              )}
-              {tab === "checks" && <ChecksList />}
-              {tab === "chat" && <ChatPanel />}
-            </div>
-          </div>
-        </div>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {phase === "upload" && (
+          <UploadForm
+            file={file} setFile={setFile}
+            tipoTramite={tipoTramite} setTipoTramite={setTipoTramite}
+            criterios={criterios} setCriterios={setCriterios}
+            onRun={run} error={error}
+          />
+        )}
+        {phase === "loading" && <LoadingView filename={file?.name} />}
+        {phase === "result" && result && (
+          <ResultView result={result} onReset={reset} onDownload={downloadTxt} />
+        )}
       </div>
     </div>
   );

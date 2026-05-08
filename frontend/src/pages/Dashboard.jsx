@@ -1,16 +1,29 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Topbar from "../components/Topbar";
+import { getStats } from "../services/api";
 
-// ── KPI data ──────────────────────────────────────────
-const KPI_DATA = [
-  { label: "Documentos este mes",  value: "6,211",  delta: "+18%", tone: "cyan",    icon: "📄" },
-  { label: "Páginas procesadas",   value: "88.7k",  delta: "+14%", tone: "blue",    icon: "📊" },
-  { label: "Expedientes nexificados", value: "2,847", delta: "+21%", tone: "purple", icon: "🗂️" },
-  { label: "Score de validación",  value: "97.8%",  delta: "+1.2", tone: "success", icon: "⚡" },
-  { label: "Tiempo promedio",      value: "22s",    delta: "−8%",  tone: "neutral", icon: "⏱" },
-  { label: "Analistas activos",    value: "69",     delta: "+3",   tone: "neutral", icon: "👥" },
-];
+// ── Static fallback KPIs ───────────────────────────────
+const FALLBACK_STATS = {
+  documentos_mes: 6211,
+  paginas_procesadas: 88700,
+  expedientes_nexificados: 2847,
+  score_validacion: 97.8,
+  tiempo_promedio: 22,
+  analistas_activos: 69,
+};
+
+function buildKpis(stats) {
+  const fmt = (n) => n >= 10000 ? `${(n / 1000).toFixed(1)}k` : n.toLocaleString("es-CO");
+  return [
+    { label: "Documentos este mes",      value: fmt(stats.documentos_mes),          delta: "+18%", tone: "cyan",    icon: "📄" },
+    { label: "Páginas procesadas",        value: fmt(stats.paginas_procesadas),       delta: "+14%", tone: "blue",    icon: "📊" },
+    { label: "Expedientes nexificados",   value: fmt(stats.expedientes_nexificados),  delta: "+21%", tone: "purple",  icon: "🗂️" },
+    { label: "Score de validación",       value: `${stats.score_validacion}%`,        delta: "+1.2", tone: "success", icon: "⚡" },
+    { label: "Tiempo promedio",           value: `${stats.tiempo_promedio}s`,         delta: "−8%",  tone: "neutral", icon: "⏱" },
+    { label: "Analistas activos",         value: String(stats.analistas_activos),     delta: "+3",   tone: "neutral", icon: "👥" },
+  ];
+}
 
 const TONES = {
   cyan:    { bg: "rgba(0,194,203,0.08)",  fg: "#00C2CB", bar: "#00C2CB" },
@@ -75,7 +88,7 @@ function NxButton({ variant = "primary", icon, onClick, children, style = {} }) 
   );
 }
 
-function KpiCard({ kpi }) {
+function KpiCard({ kpi, loading }) {
   const t = TONES[kpi.tone];
   const isNeg = kpi.delta.startsWith("−") || kpi.delta.startsWith("-");
   return (
@@ -88,7 +101,11 @@ function KpiCard({ kpi }) {
         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: "#8494A8" }}>{kpi.label}</div>
         <div style={{ width: 28, height: 28, borderRadius: 8, background: t.bg, color: t.fg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{kpi.icon}</div>
       </div>
-      <div style={{ fontSize: 26, fontWeight: 800, color: "#0A0F1E", letterSpacing: -0.5, lineHeight: 1 }}>{kpi.value}</div>
+      {loading ? (
+        <div style={{ height: 26, width: "60%", background: "rgba(10,15,30,0.06)", borderRadius: 6, animation: "nx-pulse 1.5s infinite" }} />
+      ) : (
+        <div style={{ fontSize: 26, fontWeight: 800, color: "#0A0F1E", letterSpacing: -0.5, lineHeight: 1 }}>{kpi.value}</div>
+      )}
       <div style={{ fontSize: 11, fontWeight: 700, marginTop: 8, color: isNeg ? "#EF4444" : "#10B981" }}>
         {isNeg ? "▼" : "▲"} {kpi.delta.replace(/^[−\-+]/, "")} vs. mes anterior
       </div>
@@ -262,6 +279,17 @@ function DocTable() {
 // ── Page ──────────────────────────────────────────────
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [stats, setStats] = useState(FALLBACK_STATS);
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  useEffect(() => {
+    getStats()
+      .then(data => setStats(data))
+      .catch(() => {/* silently use fallback */})
+      .finally(() => setStatsLoading(false));
+  }, []);
+
+  const kpiData = buildKpis(stats);
 
   const topbarActions = (
     <>
@@ -288,7 +316,7 @@ export default function Dashboard() {
           <div>
             <div style={{ fontSize: 22, fontWeight: 800, color: "#0A0F1E", letterSpacing: -0.5 }}>Resumen del Grupo Bolívar</div>
             <div style={{ fontSize: 13, color: "#556070", marginTop: 4 }}>
-              Jueves 23 de abril · <strong style={{ color: "#00C2CB" }}>69 analistas</strong> conectados en 3 organizaciones
+              Jueves 23 de abril · <strong style={{ color: "#00C2CB" }}>{stats.analistas_activos} analistas</strong> conectados en 3 organizaciones
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -299,7 +327,7 @@ export default function Dashboard() {
 
         {/* KPIs */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 14 }}>
-          {KPI_DATA.map(k => <KpiCard key={k.label} kpi={k} />)}
+          {kpiData.map(k => <KpiCard key={k.label} kpi={k} loading={statsLoading} />)}
         </div>
 
         {/* Validador spotlight */}
