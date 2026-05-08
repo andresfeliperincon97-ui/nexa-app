@@ -84,13 +84,22 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto a
 
     response_text = message.content[0].text.strip()
 
+    def limpiar_json(texto):
+        texto = texto.strip()
+        if "```json" in texto:
+            texto = texto.split("```json")[1].split("```")[0].strip()
+        elif "```" in texto:
+            texto = texto.split("```")[1].split("```")[0].strip()
+        inicio = texto.find("{")
+        fin = texto.rfind("}")
+        if inicio != -1 and fin != -1:
+            texto = texto[inicio:fin+1]
+        return texto
+
     try:
-        result = json.loads(response_text)
+        result = json.loads(limpiar_json(response_text))
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", response_text, re.DOTALL)
-        if not match:
-            raise HTTPException(status_code=500, detail="Error al parsear respuesta de IA")
-        result = json.loads(match.group())
+        raise HTTPException(status_code=500, detail="Error al parsear respuesta de IA")
 
     result["filename"] = file.filename
     result["pages"] = num_pages
