@@ -503,7 +503,8 @@ async def split_pdf(
 @app.post("/api/compress-pdf")
 async def compress_pdf(
     file: UploadFile = File(...),
-    level: str = Form("medium"),
+    dpi: int = Form(144),
+    quality: int = Form(75),
 ):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
@@ -511,15 +512,22 @@ async def compress_pdf(
     content = await file.read()
     original_size = len(content)
 
-    doc = fitz.open(stream=content, filetype="pdf")
+    dpi = max(72, min(300, dpi))
+    quality = max(10, min(100, quality))
+    zoom = dpi / 72.0
 
-    opts_map = {
-        "low":    dict(deflate=True, garbage=1),
-        "medium": dict(deflate=True, garbage=3, clean=True),
-        "high":   dict(deflate=True, garbage=4, clean=True, linear=True),
-    }
-    compressed = doc.tobytes(**opts_map.get(level, opts_map["medium"]))
-    doc.close()
+    src = fitz.open(stream=content, filetype="pdf")
+    out = fitz.open()
+
+    for page in src:
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+        jpeg_bytes = pix.tobytes("jpeg", jpg_quality=quality)
+        new_page = out.new_page(width=page.rect.width, height=page.rect.height)
+        new_page.insert_image(page.rect, stream=jpeg_bytes)
+
+    src.close()
+    compressed = out.tobytes(deflate=True, garbage=4)
+    out.close()
     compressed_size = len(compressed)
 
     return StreamingResponse(
