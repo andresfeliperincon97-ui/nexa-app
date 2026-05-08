@@ -318,6 +318,107 @@ En "orden" indica el orden exacto en que deben fusionarse los PDFs del grupo."""
         raise HTTPException(status_code=400, detail="modo debe ser 'preview' o 'ejecutar'")
 
 
+def _hex_rgb(h: str) -> tuple:
+    h = h.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    return tuple(int(h[i:i+2], 16) / 255 for i in (0, 2, 4))
+
+
+@app.post("/api/edit-pdf")
+async def edit_pdf(
+    file: UploadFile = File(...),
+    annotations: str = Form("[]"),
+):
+    content = await file.read()
+    doc = fitz.open(stream=content, filetype="pdf")
+    anns = json.loads(annotations)
+
+    for ann in anns:
+        page_idx = int(ann.get("page", 1)) - 1
+        if page_idx < 0 or page_idx >= len(doc):
+            continue
+        page = doc.load_page(page_idx)
+        pw, ph = page.rect.width, page.rect.height
+
+        x  = ann.get("x", 0)  * pw
+        y  = ann.get("y", 0)  * ph
+        w  = ann.get("w", 0.2) * pw
+        h  = ann.get("h", 0.06) * ph
+        x2 = ann.get("x2", ann.get("x", 0) + 0.2) * pw
+        y2 = ann.get("y2", ann.get("y", 0)) * ph
+
+        color  = _hex_rgb(ann.get("color", "#000000"))
+        op     = float(ann.get("opacity", 1))
+        fs     = float(ann.get("fontSize", 14))
+        sw     = float(ann.get("strokeWidth", 2))
+        atype  = ann.get("type", "")
+
+        try:
+            if atype == "text":
+                page.insert_text(
+                    fitz.Point(x, y + fs),
+                    ann.get("text", ""),
+                    fontsize=fs / 1.5,
+                    color=color,
+                )
+
+            elif atype == "highlight":
+                rect = fitz.Rect(x, y, x + w, y + h)
+                page.add_highlight_annot(rect)
+
+            elif atype == "redact":
+                rect = fitz.Rect(x, y, x + w, y + h)
+                page.draw_rect(rect, color=(0, 0, 0), fill=(0, 0, 0), fill_opacity=op)
+
+            elif atype == "rect":
+                rect = fitz.Rect(x, y, x + w, y + h)
+                fill = _hex_rgb(ann.get("color", "#0000ff")) if ann.get("fill") else None
+                page.draw_rect(rect, color=color, fill=fill, fill_opacity=0.15 if fill else 0, width=sw)
+
+            elif atype == "ellipse":
+                rect = fitz.Rect(x, y, x + w, y + h)
+                page.draw_oval(rect, color=color, width=sw)
+
+            elif atype in ("line", "arrow"):
+                page.draw_line(fitz.Point(x, y), fitz.Point(x2, y2), color=color, width=sw)
+
+            elif atype == "stamp":
+                rect = fitz.Rect(x, y, x + w, y + h)
+                page.draw_rect(rect, color=color, fill=color, fill_opacity=0.1, width=2)
+                page.insert_text(fitz.Point(x + 6, y + h - 6), ann.get("text", "SELLO"), fontsize=fs / 1.5, color=color)
+
+            elif atype == "watermark":
+                text = ann.get("text", "CONFIDENCIAL")
+                wm_color = _hex_rgb(ann.get("color", "#999999"))
+                page.insert_text(
+                    fitz.Point(pw * 0.08, ph * 0.62),
+                    text,
+                    fontsize=min(pw, ph) * 0.08,
+                    color=wm_color,
+                    rotate=40,
+                )
+
+            elif atype == "signature":
+                img_data = ann.get("signatureData", "")
+                if "," in img_data:
+                    img_bytes = base64.b64decode(img_data.split(",")[1])
+                    rect = fitz.Rect(x, y, x + w, y + h)
+                    page.insert_image(rect, stream=img_bytes)
+
+        except Exception as e:
+            print(f"WARN edit-pdf ann {atype}: {e}")
+
+    output = io.BytesIO(doc.tobytes())
+    doc.close()
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=editado.pdf"},
+    )
+
+
 @app.get("/api/stats")
 def get_stats():
     return {

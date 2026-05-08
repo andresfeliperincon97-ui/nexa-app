@@ -4,6 +4,7 @@ import Dashboard from "./pages/Dashboard";
 import NexificarMasivo from "./pages/NexificarMasivo";
 import NexificarIA from "./pages/NexificarIA";
 import NexificarPDFs from "./pages/NexificarPDFs";
+import EditarPDF from "./pages/EditarPDF";
 import ValidadorIA from "./pages/ValidadorIA";
 import Organizacion from "./pages/Organizacion";
 
@@ -31,7 +32,7 @@ function AppLayout() {
           <Route path="/nexificar-pdfs" element={<NexificarPDFs />} />
           <Route path="/pdfs"         element={<PlaceholderPage title="Nexíficar PDFs" icon="📄" />} />
           <Route path="/dividir"      element={<PlaceholderPage title="Dividir PDF" icon="✂️" />} />
-          <Route path="/editar"       element={<PlaceholderPage title="Editar PDF" icon="✏️" />} />
+          <Route path="/editar"       element={<EditarPDF />} />
           <Route path="/eliminar"     element={<PlaceholderPage title="Eliminar Páginas" icon="🗑️" />} />
         </Routes>
       </div>
