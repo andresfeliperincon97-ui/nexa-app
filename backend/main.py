@@ -28,6 +28,21 @@ app.add_middleware(
 )
 
 
+def limpiar_json(texto: str) -> str:
+    texto = texto.strip()
+    if "```json" in texto:
+        texto = texto.split("```json")[1].split("```")[0].strip()
+    elif "```" in texto:
+        texto = texto.split("```")[1].split("```")[0].strip()
+    inicio = texto.find("{")
+    fin = texto.rfind("}")
+    if inicio != -1 and fin != -1:
+        texto = texto[inicio:fin+1]
+    if not texto.startswith(("{", "[")):
+        raise ValueError("Respuesta no contiene JSON válido: " + texto[:200])
+    return texto
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "app": "NEXA", "version": "1.0"}
@@ -85,20 +100,6 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto a
 
     response_text = message.content[0].text.strip()
 
-    def limpiar_json(texto):
-        texto = texto.strip()
-        if "```json" in texto:
-            texto = texto.split("```json")[1].split("```")[0].strip()
-        elif "```" in texto:
-            texto = texto.split("```")[1].split("```")[0].strip()
-        inicio = texto.find("{")
-        fin = texto.rfind("}")
-        if inicio != -1 and fin != -1:
-            texto = texto[inicio:fin+1]
-        if not texto.startswith(("{", "[")):
-            raise ValueError("Respuesta no contiene JSON válido: " + texto[:200])
-        return texto
-
     try:
         texto_limpio = limpiar_json(response_text)
         result = json.loads(texto_limpio)
@@ -150,68 +151,104 @@ async def nexificar_ia(
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="El archivo ZIP está corrupto")
 
-    pdf_names = [
+    pdf_paths = [
         n for n in zf.namelist()
-        if n.lower().endswith(".pdf") and not os.path.basename(n).startswith(".")
+        if n.lower().endswith(".pdf")
+        and not os.path.basename(n).startswith(".")
         and not n.startswith("__MACOSX")
     ]
-
-    if not pdf_names:
+    if not pdf_paths:
         raise HTTPException(status_code=400, detail="El ZIP no contiene archivos PDF")
 
-    def llamar_claude(texto_pdf: str, nombre_original: str) -> str:
-        prompt = (
-            f"El usuario quiere: {instruccion}. "
-            f"Dado este texto de un PDF, determina el nuevo nombre que debería tener el archivo. "
-            f"Responde SOLO con el nombre del archivo sin extensión, sin explicaciones, "
-            f"sin puntos ni comas en números de cédula.\n\n"
-            f"Nombre original del archivo: {nombre_original}\n"
-            f"Texto del PDF:\n{texto_pdf[:4000]}"
-        )
-        msg = client.messages.create(
-            model="claude-sonnet-4-5",
-            max_tokens=100,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return msg.content[0].text.strip()
+    # basename → full path inside ZIP (last one wins on collision)
+    name_to_path = {os.path.basename(p): p for p in pdf_paths}
+    basenames = list(name_to_path.keys())
 
+    # ── Ask Claude to plan the grouping ──────────────────
+    lista = "\n".join(f"- {b}" for b in basenames)
+    prompt = f"""Tienes estos archivos en el ZIP:
+{lista}
+
+Instrucción del usuario: {instruccion}
+
+Responde SOLO con JSON válido con esta estructura exacta, sin texto adicional:
+{{
+  "grupos": [
+    {{
+      "archivos": ["ESC_63493576.pdf", "PYS_63493576.pdf"],
+      "nombre_salida": "63493576.pdf",
+      "orden": ["ESC_63493576.pdf", "PYS_63493576.pdf"]
+    }}
+  ]
+}}
+
+Cada archivo del ZIP debe aparecer en exactamente un grupo.
+Si un archivo va solo (sin fusionar), ponlo en un grupo de un elemento.
+En "orden" indica el orden exacto en que deben fusionarse los PDFs del grupo."""
+
+    msg = client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=4096,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    try:
+        plan = json.loads(limpiar_json(msg.content[0].text))
+        grupos = plan.get("grupos", [])
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"ERROR nexificar-ia parser: {e} | {msg.content[0].text[:300]}")
+        raise HTTPException(status_code=500, detail="Error al planificar la nexificación")
+
+    if not grupos:
+        raise HTTPException(status_code=500, detail="Claude no devolvió grupos válidos")
+
+    # ── Preview mode ──────────────────────────────────────
     if modo == "preview":
-        sample = pdf_names[:5]
         preview = []
-        for name in sample:
-            base = os.path.basename(name)
-            try:
-                pdf_bytes = zf.read(name)
-                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                text = "".join(page.get_text() for page in doc)
-                doc.close()
-                nuevo = llamar_claude(text, base) + ".pdf"
-                preview.append({"original": base, "propuesto": nuevo})
-            except Exception as e:
-                print(f"ERROR preview {base}: {e}")
-                preview.append({"original": base, "propuesto": f"ERROR: {str(e)[:80]}"})
-        return {"modo": "preview", "total_pdfs": len(pdf_names), "preview": preview}
+        for grupo in grupos[:5]:
+            archivos = grupo.get("archivos", [])
+            nombre_salida = grupo.get("nombre_salida", "sin_nombre.pdf")
+            if len(archivos) > 1:
+                original = " + ".join(archivos)
+            else:
+                original = archivos[0] if archivos else "?"
+            preview.append({"original": original, "propuesto": nombre_salida})
+        return {
+            "modo": "preview",
+            "total_pdfs": len(basenames),
+            "total_grupos": len(grupos),
+            "preview": preview,
+        }
 
+    # ── Ejecutar mode ─────────────────────────────────────
     elif modo == "ejecutar":
         output_buf = io.BytesIO()
         ok = 0
         errores = 0
+
         with zipfile.ZipFile(output_buf, "w", zipfile.ZIP_DEFLATED) as out_zip:
-            for name in pdf_names:
-                base = os.path.basename(name)
-                nuevo_nombre = base
+            for grupo in grupos:
+                orden = grupo.get("orden") or grupo.get("archivos", [])
+                nombre_salida = grupo.get("nombre_salida", "sin_nombre.pdf")
                 try:
-                    pdf_bytes = zf.read(name)
-                    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                    text = "".join(page.get_text() for page in doc)
-                    doc.close()
-                    nuevo_nombre = llamar_claude(text, base) + ".pdf"
+                    merged = fitz.open()
+                    for arch in orden:
+                        path = name_to_path.get(arch)
+                        if path is None:
+                            print(f"WARN: archivo no encontrado en ZIP: {arch}")
+                            continue
+                        doc = fitz.open(stream=zf.read(path), filetype="pdf")
+                        merged.insert_pdf(doc)
+                        doc.close()
+                    if merged.page_count == 0:
+                        raise ValueError("El grupo no produjo páginas")
+                    out_zip.writestr(nombre_salida, merged.tobytes())
+                    merged.close()
                     ok += 1
                 except Exception as e:
-                    print(f"ERROR ejecutar {base}: {e}")
-                    pdf_bytes = zf.read(name)
+                    print(f"ERROR ejecutar grupo '{nombre_salida}': {e}")
                     errores += 1
-                out_zip.writestr(nuevo_nombre, pdf_bytes)
+
         output_buf.seek(0)
         return StreamingResponse(
             output_buf,
@@ -223,6 +260,7 @@ async def nexificar_ia(
                 "Access-Control-Expose-Headers": "X-Procesados-Ok, X-Procesados-Error",
             },
         )
+
     else:
         raise HTTPException(status_code=400, detail="modo debe ser 'preview' o 'ejecutar'")
 
