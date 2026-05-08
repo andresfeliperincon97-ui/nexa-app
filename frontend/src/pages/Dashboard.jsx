@@ -32,7 +32,7 @@ const HOW_STEPS = [
 ];
 
 const OTHER_TOOLS = [
-  { icon: "📄", title: "Nexificar PDFs",   desc: "Une múltiples PDFs en uno solo",   href: "/pdfs" },
+  { icon: "📄", title: "Nexificar PDFs",   desc: "Une múltiples PDFs en uno solo",   href: "/nexificar-pdfs" },
   { icon: "✂️", title: "Dividir PDF",       desc: "Divide por rango de páginas",       href: "/dividir" },
   { icon: "✏️", title: "Editar PDF",        desc: "Editor visual de páginas",          href: "/editar" },
   { icon: "🗑️", title: "Eliminar Páginas",  desc: "Elimina páginas visualmente",       href: "/eliminar" },

@@ -135,6 +135,38 @@ async def merge_pdfs(files: list[UploadFile] = File(...)):
     )
 
 
+@app.post("/api/merge-pdfs")
+async def merge_pdfs_ordered(
+    files: list[UploadFile] = File(...),
+    nombre_salida: str = Form("documento_unificado.pdf"),
+):
+    if len(files) < 2:
+        raise HTTPException(status_code=400, detail="Se necesitan al menos 2 archivos PDF")
+
+    merged = fitz.open()
+    for file in files:
+        if not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail=f"{file.filename} no es un PDF")
+        data = await file.read()
+        doc = fitz.open(stream=data, filetype="pdf")
+        merged.insert_pdf(doc)
+        doc.close()
+
+    if merged.page_count == 0:
+        raise HTTPException(status_code=400, detail="Los PDFs no contienen páginas")
+
+    output = io.BytesIO(merged.tobytes())
+    merged.close()
+    output.seek(0)
+
+    safe_name = nombre_salida if nombre_salida.lower().endswith(".pdf") else nombre_salida + ".pdf"
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={safe_name}"},
+    )
+
+
 @app.post("/api/nexificar-ia")
 async def nexificar_ia(
     file: UploadFile = File(...),

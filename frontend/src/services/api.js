@@ -55,3 +55,15 @@ export async function mergePDFs(files) {
   if (!res.ok) throw new Error("Error al unir los PDFs");
   return res.blob();
 }
+
+export async function mergePDFsOrdered(files, nombreSalida) {
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+  form.append("nombre_salida", nombreSalida || "documento_unificado.pdf");
+  const res = await fetch(`${API_URL}/api/merge-pdfs`, { method: "POST", body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error al unificar los PDFs");
+  }
+  return res.blob();
+}
