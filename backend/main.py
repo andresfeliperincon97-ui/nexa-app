@@ -2,6 +2,7 @@ import os
 import io
 import json
 import re
+import zipfile
 
 import fitz  # PyMuPDF
 from PyPDF2 import PdfMerger
@@ -131,6 +132,99 @@ async def merge_pdfs(files: list[UploadFile] = File(...)):
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=merged.pdf"},
     )
+
+
+@app.post("/api/nexificar-ia")
+async def nexificar_ia(
+    file: UploadFile = File(...),
+    instruccion: str = Form(...),
+    modo: str = Form("preview"),
+):
+    if not file.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos ZIP")
+
+    content = await file.read()
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="El archivo ZIP está corrupto")
+
+    pdf_names = [
+        n for n in zf.namelist()
+        if n.lower().endswith(".pdf") and not os.path.basename(n).startswith(".")
+        and not n.startswith("__MACOSX")
+    ]
+
+    if not pdf_names:
+        raise HTTPException(status_code=400, detail="El ZIP no contiene archivos PDF")
+
+    def llamar_claude(texto_pdf: str, nombre_original: str) -> str:
+        prompt = (
+            f"El usuario quiere: {instruccion}. "
+            f"Dado este texto de un PDF, determina el nuevo nombre que debería tener el archivo. "
+            f"Responde SOLO con el nombre del archivo sin extensión, sin explicaciones, "
+            f"sin puntos ni comas en números de cédula.\n\n"
+            f"Nombre original del archivo: {nombre_original}\n"
+            f"Texto del PDF:\n{texto_pdf[:4000]}"
+        )
+        msg = client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=100,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text.strip()
+
+    if modo == "preview":
+        sample = pdf_names[:5]
+        preview = []
+        for name in sample:
+            base = os.path.basename(name)
+            try:
+                pdf_bytes = zf.read(name)
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                text = "".join(page.get_text() for page in doc)
+                doc.close()
+                nuevo = llamar_claude(text, base) + ".pdf"
+                preview.append({"original": base, "propuesto": nuevo})
+            except Exception as e:
+                print(f"ERROR preview {base}: {e}")
+                preview.append({"original": base, "propuesto": f"ERROR: {str(e)[:80]}"})
+        return {"modo": "preview", "total_pdfs": len(pdf_names), "preview": preview}
+
+    elif modo == "ejecutar":
+        output_buf = io.BytesIO()
+        ok = 0
+        errores = 0
+        with zipfile.ZipFile(output_buf, "w", zipfile.ZIP_DEFLATED) as out_zip:
+            for name in pdf_names:
+                base = os.path.basename(name)
+                nuevo_nombre = base
+                try:
+                    pdf_bytes = zf.read(name)
+                    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                    text = "".join(page.get_text() for page in doc)
+                    doc.close()
+                    nuevo_nombre = llamar_claude(text, base) + ".pdf"
+                    ok += 1
+                except Exception as e:
+                    print(f"ERROR ejecutar {base}: {e}")
+                    pdf_bytes = zf.read(name)
+                    errores += 1
+                out_zip.writestr(nuevo_nombre, pdf_bytes)
+        output_buf.seek(0)
+        return StreamingResponse(
+            output_buf,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": "attachment; filename=nexificado.zip",
+                "X-Procesados-Ok": str(ok),
+                "X-Procesados-Error": str(errores),
+                "Access-Control-Expose-Headers": "X-Procesados-Ok, X-Procesados-Error",
+            },
+        )
+    else:
+        raise HTTPException(status_code=400, detail="modo debe ser 'preview' o 'ejecutar'")
 
 
 @app.get("/api/stats")

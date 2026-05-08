@@ -25,6 +25,29 @@ export async function validatePDF(file, tipoTramite, criterios) {
   return res.json();
 }
 
+export async function nexificarIA(file, instruccion, modo) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("instruccion", instruccion);
+  form.append("modo", modo);
+  const res = await fetch(`${API_URL}/api/nexificar-ia`, { method: "POST", body: form });
+  if (modo === "ejecutar") {
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Error al ejecutar nexificación");
+    }
+    const blob = await res.blob();
+    const ok = parseInt(res.headers.get("X-Procesados-Ok") || "0");
+    const errores = parseInt(res.headers.get("X-Procesados-Error") || "0");
+    return { blob, ok, errores };
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error en vista previa");
+  }
+  return res.json();
+}
+
 export async function mergePDFs(files) {
   const form = new FormData();
   for (const f of files) form.append("files", f);

@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
 import NexificarMasivo from "./pages/NexificarMasivo";
+import NexificarIA from "./pages/NexificarIA";
 import ValidadorIA from "./pages/ValidadorIA";
 import Organizacion from "./pages/Organizacion";
 
@@ -33,7 +34,8 @@ function AppLayout() {
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "#F6F8FB" }}>
         <Routes>
           <Route path="/"            element={<Dashboard />} />
-          <Route path="/masivo"      element={<NexificarMasivo />} />
+          <Route path="/masivo"        element={<NexificarMasivo />} />
+          <Route path="/nexificar-ia" element={<NexificarIA />} />
           <Route path="/organizacion" element={<Organizacion />} />
           <Route path="/pdfs"        element={<PlaceholderPage title="Nexíficar PDFs" icon="📄" />} />
           <Route path="/dividir"     element={<PlaceholderPage title="Dividir PDF" icon="✂️" />} />

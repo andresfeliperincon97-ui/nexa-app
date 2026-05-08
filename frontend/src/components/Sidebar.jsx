@@ -2,8 +2,9 @@ import { useNavigate, useLocation } from "react-router-dom";
 
 const NAV_ITEMS = [
   { key: "/",           icon: "◈",  name: "Dashboard",         desc: "Vista general" },
-  { key: "/masivo",     icon: "🗂️", name: "Nexíficar Masivo",  desc: "Excel + ZIP" },
-  { key: "/pdfs",       icon: "📄", name: "Nexíficar PDFs",     desc: "Une múltiples" },
+  { key: "/masivo",       icon: "🗂️", name: "Nexíficar Masivo",  desc: "Excel + ZIP" },
+  { key: "/nexificar-ia", icon: "✨", name: "Nexificar IA",      desc: "Con lenguaje natural" },
+  { key: "/pdfs",         icon: "📄", name: "Nexíficar PDFs",    desc: "Une múltiples" },
   { key: "/dividir",    icon: "✂️", name: "Dividir PDF",         desc: "Por páginas" },
   { key: "/editar",     icon: "✏️", name: "Editar PDF",          desc: "Editor visual" },
   { key: "/eliminar",   icon: "🗑️", name: "Eliminar Páginas",    desc: "Visualmente" },
