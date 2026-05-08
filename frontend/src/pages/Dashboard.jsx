@@ -44,7 +44,7 @@ export default function Dashboard() {
   return (
     <>
       <Topbar supertitle="⚡ NEXA Platform" title="Bienvenido a NEXA ⚡" />
-      <div style={{ padding: "40px 40px 80px", display: "flex", flexDirection: "column", gap: 48, maxWidth: 1100 }}>
+      <div style={{ padding: "40px 40px 80px", display: "flex", flexDirection: "column", gap: 48 }}>
 
         {/* Header */}
         <div>

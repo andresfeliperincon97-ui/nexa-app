@@ -281,7 +281,7 @@ export default function NexificarIA() {
         supertitle="✨ Nexificar IA"
         title="Procesa tus PDFs con instrucciones en lenguaje natural"
       />
-      <div style={{ padding: "28px 32px 64px", display: "flex", flexDirection: "column", gap: 20, maxWidth: 900 }}>
+      <div style={{ padding: "28px 32px 64px", display: "flex", flexDirection: "column", gap: 20 }}>
 
         {/* Upload + instrucción */}
         {(phase === "upload" || phase === "loading_preview") && (

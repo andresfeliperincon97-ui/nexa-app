@@ -270,7 +270,7 @@ export default function NexificarPDFs() {
     <>
       <style>{SHIMMER_STYLE}</style>
       <Topbar supertitle="Herramientas PDF" title="Nexificar PDFs" />
-      <div style={{ padding: "40px 40px 80px", maxWidth: 1100 }}>
+      <div style={{ padding: "40px 40px 80px" }}>
 
         {/* Drop zone */}
         <div
